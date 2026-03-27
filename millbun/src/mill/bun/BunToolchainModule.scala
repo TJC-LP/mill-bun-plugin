@@ -23,6 +23,39 @@ object BunToolchainModule {
       .map(dir => os.Path(dir) / name)
       .find(os.exists(_))
   }
+
+  /** Copy a generated workspace into a fresh task destination, preserving layout. */
+  def copyWorkspace(source: os.Path, dest: os.Path): Unit = {
+    os.walk(source)
+      .foreach(path => os.copy.over(path, dest / path.relativeTo(source), createFolders = true))
+  }
+
+  /**
+   * Copy files or directories into a Bun workspace while preserving their relative path
+   * beneath the nearest matching source root when possible.
+   */
+  def copyPathRefs(
+      refs: Seq[PathRef],
+      destRoot: os.Path,
+      sourceRoots: Seq[os.Path] = Seq.empty
+  ): Unit = {
+    refs.foreach { ref =>
+      val source = ref.path
+      val target =
+        sourceRoots.iterator
+          .find(root => source.startsWith(root) && source != root)
+          .map(root => destRoot / source.relativeTo(root))
+          .getOrElse(destRoot / source.last)
+
+      if (os.isDir(source)) {
+        os.walk(source).foreach { path =>
+          os.copy.over(path, target / path.relativeTo(source), createFolders = true)
+        }
+      } else {
+        os.copy.over(source, target, createFolders = true)
+      }
+    }
+  }
 }
 
 trait BunToolchainModule extends Module {

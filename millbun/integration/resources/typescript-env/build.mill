@@ -11,4 +11,7 @@ import mill.javascriptlib.bun.*
 object app extends BunTypeScriptModule {
   override def moduleDir = build.moduleDir
   override def npmDevDeps = Task { Seq("typescript@5.7.3") }
+  def bunProxy = Task.Source(moduleDir / "bun-proxy")
+  override def managedBunExecutable = Task { Some(PathRef(bunProxy().path)) }
+  override def bunEnv = Task { Map("BUN_PROXY_MARKER" -> "present") }
 }

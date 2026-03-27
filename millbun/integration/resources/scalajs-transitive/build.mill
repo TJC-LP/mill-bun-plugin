@@ -10,14 +10,22 @@ import mill.scalajslib.*
 import mill.scalajslib.api.*
 import mill.scalajslib.bun.*
 
-object app extends BunScalaJSModule {
+object lib extends BunScalaJSModule {
   override def moduleDir = build.moduleDir
   def scalaVersion = "3.8.2"
 
+  override def moduleKind = Task { ModuleKind.ESModule }
+  override def sources = Task.Sources(moduleDir / "lib")
+  override def npmDeps = Task { Seq("lodash@4.17.21") }
+}
+
+object app extends BunScalaJSModule {
+  override def moduleDir = build.moduleDir
+  def scalaVersion = lib.scalaVersion
+
   override def mainClass = Some("Main")
   override def moduleKind = Task { ModuleKind.ESModule }
-
-  override def npmDeps = Task { Seq("lodash@4.17.21") }
-
+  override def moduleDeps = Seq(lib)
+  override def sources = Task.Sources(moduleDir / "app")
   override def bunBundleTarget = Task { "bun" }
 }

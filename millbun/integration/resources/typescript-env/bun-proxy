@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+set -eu
+
+printf '%s:%s\n' "${1:-unknown}" "${BUN_PROXY_MARKER:-missing}" >> "$PWD/.bun-env-log"
+exec bun "$@"

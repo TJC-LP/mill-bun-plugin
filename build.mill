@@ -1,17 +1,22 @@
 package build
 
 import mill.*, scalalib.*, publish.*
+import mill.api.BuildCtx
 
 object millbun extends ScalaModule, PublishModule {
   def millVersion = "1.1.5"
   def scalaVersion = "3.8.2"
   def jvmVersion = "25"
   def platformSuffix = "_mill1"
+  def bundledScalaJSVersion = "1.20.2"
 
   def artifactName = "mill-bun"
 
   def mvnDeps = Seq(
-    mvn"com.lihaoyi::mill-libs:$millVersion"
+    mvn"com.lihaoyi::mill-libs:$millVersion",
+    mvn"com.lihaoyi::mill-libs-scalajslib-config-1:$millVersion",
+    mvn"org.scala-js:scalajs-linker_2.13:$bundledScalaJSVersion",
+    mvn"org.scala-js:scalajs-js-envs_2.13:1.4.0"
   )
 
   object test extends ScalaTests, TestModule.Utest {
@@ -25,11 +30,15 @@ object millbun extends ScalaModule, PublishModule {
       mvn"com.lihaoyi::mill-testkit:$millVersion",
       mvn"com.lihaoyi::utest:0.8.5"
     )
+    override def resources = Task.Sources()
     def forkEnv = Task {
+      val millScript =
+        if (scala.util.Properties.isWin) BuildCtx.workspaceRoot / "mill.bat"
+        else BuildCtx.workspaceRoot / "mill"
       val repos = Seq(publishLocalTestRepo().path.toNIO.toUri.toASCIIString) ++
         Seq(Task.env.getOrElse("COURSIER_REPOSITORIES", "ivy2Local|central"))
       Map(
-        "MILL_EXECUTABLE_PATH" -> millExecutable.assembly().path.toString,
+        "MILL_EXECUTABLE_PATH" -> millScript.toString,
         "COURSIER_REPOSITORIES" -> repos.mkString("|")
       )
     }

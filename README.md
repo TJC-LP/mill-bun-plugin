@@ -16,6 +16,7 @@ Keeps Mill's task graph, module structure, caching, Scala.js linker integration,
 
 ```scala
 //| mill-version: 1.1.5
+//| mill-jvm-version: system
 //| mvnDeps:
 //| - com.tjclp::mill-bun_mill1:0.1.0-SNAPSHOT
 
@@ -23,11 +24,12 @@ package build
 
 import mill.*
 import mill.scalajslib.*
+import mill.scalajslib.api.*
 import mill.scalajslib.bun.*
 
 object app extends BunScalaJSModule {
-  def scalaVersion = "3.3.6"
-  def scalaJSVersion = "1.20.2"
+  override def moduleDir = build.moduleDir
+  def scalaVersion = "3.8.2"
   override def moduleKind = Task { ModuleKind.ESModule }
   override def npmDeps = Task { Seq("react@19.1.1") }
   override def bunBundleTarget = Task { "browser" }
@@ -36,10 +38,13 @@ object app extends BunScalaJSModule {
 }
 ```
 
+`BunScalaJSModule` inherits Mill's bundled current Scala.js version, so you configure `scalaVersion` on the module but do not override `scalaJSVersion`. If you keep Scala.js sources at the build root such as `src/`, override `moduleDir = build.moduleDir`; otherwise Mill will look under `<module-name>/src`.
+
 ### TypeScript
 
 ```scala
 //| mill-version: 1.1.5
+//| mill-jvm-version: system
 //| mvnDeps:
 //| - com.tjclp::mill-bun_mill1:0.1.0-SNAPSHOT
 
@@ -49,6 +54,7 @@ import mill.*
 import mill.javascriptlib.bun.*
 
 object app extends BunTypeScriptModule {
+  override def moduleDir = build.moduleDir
   override def npmDeps = Task { Seq("express@4.21.2") }
   override def bunBundleTarget = Task { "bun" }
 
@@ -79,6 +85,8 @@ Extends `ScalaJSModule` with Bun runtime and bundling.
 |------|---------|-------------|
 | `npmDeps` | `Seq.empty` | JS packages for `@JSImport` resolution |
 | `npmDevDeps` | `Seq.empty` | Dev-only JS packages |
+| `transitiveNpmDeps` | — | Includes `npmDeps` from upstream `BunScalaJSModule` dependencies |
+| `transitiveNpmDevDeps` | — | Includes dev deps from upstream `BunScalaJSModule` dependencies |
 | `bunBundleTarget` | `"browser"` | `bun build --target` value |
 | `bunBundleFormat` | `None` | Output format (`esm`, `cjs`) |
 | `bunBundleSplitting` | `false` | Enable code splitting |
@@ -91,6 +99,8 @@ Extends `ScalaJSModule` with Bun runtime and bundling.
 ### `BunTypeScriptModule`
 
 Extends Mill's `TypeScriptModule`, replacing npm/node/esbuild with Bun.
+For top-level modules whose sources live at the workspace root, set `override def moduleDir = build.moduleDir`.
+When Mill's default `src/<module>.ts` entrypoint is absent, the Bun run/bundle tasks fall back to `src/main.ts`, `src/index.ts`, `main.ts`, and `index.ts`.
 
 | Task | Default | Description |
 |------|---------|-------------|
@@ -103,6 +113,7 @@ Extends Mill's `TypeScriptModule`, replacing npm/node/esbuild with Bun.
 | `bunTestArgs` | `Seq.empty` | Extra raw `bun test` flags |
 
 Overrides: `npmInstall` (bun install), `compile` (bun x tsc), `run` (bun run), `bundle` (bun build).
+Bundle outputs preserve the compiled workspace layout, including `resources/`, and `bunCompileResources` keep their relative paths beneath the module directory.
 
 ## Examples
 

@@ -38,6 +38,12 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
   /** Bun-only package.json fields not modeled by Mill's typed PackageJson. */
   def bunPackageJsonExtras: T[ujson.Obj] = Task { ujson.Obj() }
 
+  /** Environment for Bun toolchain subprocesses such as install/build/test. */
+  protected def bunToolEnv: T[Map[String, String]] = Task { bunEnv() }
+
+  /** Runtime environment for Bun-executed programs and tests. */
+  protected def bunRuntimeEnv: T[Map[String, String]] = Task { bunEnv() ++ forkEnv() }
+
   /** Mill's default TS deps assume ts-node/esbuild; Bun only needs TypeScript plus ambient types. */
   override def tsDeps: T[Seq[String]] = Task {
     Seq("typescript@5.7.3") ++
@@ -99,7 +105,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
       bunExecutable(),
       Seq("install") ++ bunInstallArgs() ++ transitiveUnmanagedDeps().map(_.path.toString),
       cwd = dest,
-      env = forkEnv()
+      env = bunToolEnv()
     )
 
     PathRef(dest)
@@ -121,7 +127,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
       bunExecutable(),
       Seq("x", "tsc", "--project", "tsconfig.json"),
       cwd = Task.dest,
-      env = forkEnv()
+      env = bunToolEnv()
     )
 
     PathRef(Task.dest)
@@ -134,7 +140,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
   /** Run the entrypoint directly with Bun. */
   override def run(args: mill.api.Args): Command[CommandResult] = Task.Command {
     val cwd = compile().path
-    val mainFile = mainFilePath().relativeTo(cwd).toString
+    val mainFile = resolvedEntrypoint(mainFilePath(), cwd).relativeTo(cwd).toString
     os.call(
       Seq(bunExecutable(), "run") ++
         bunRunArgs() ++
@@ -142,27 +148,42 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
         computedArgs() ++
         args.value,
       cwd = cwd,
-      env = forkEnv(),
+      env = bunRuntimeEnv(),
       stdout = os.Inherit,
       stderr = os.Inherit
     )
   }
 
   private def copyCompileResources(resources: Seq[PathRef], dest: os.Path): Unit =
-    resources.foreach { ref =>
-      val p = ref.path
-      os.copy.over(p, dest / p.last, createFolders = true)
-    }
+    BunToolchainModule.copyPathRefs(resources, dest, Seq(moduleDir))
+
+  /**
+   * Fall back to Bun-style defaults when Mill's `src/<module>.ts` entrypoint
+   * is not present in the prepared workspace.
+   */
+  private def resolvedEntrypoint(configured: os.Path, compileDir: os.Path): os.Path = {
+    val candidates = Seq(
+      configured,
+      compileDir / "src" / "main.ts",
+      compileDir / "src" / "index.ts",
+      compileDir / "main.ts",
+      compileDir / "index.ts"
+    ).distinct
+
+    candidates.find(os.exists).getOrElse(configured)
+  }
 
   /** Bundle with Bun instead of Mill's esbuild wrapper. */
   override def bundle: T[PathRef] = Task {
-    val cwd = compile().path
-    val mainFile = mainFilePath().relativeTo(cwd).toString
+    val compileDir = compile().path
+    val buildDir = Task.dest
+    val mainFile = resolvedEntrypoint(mainFilePath(), compileDir).relativeTo(compileDir).toString
     val outFile =
       if (bunCompileExecutable()) Task.dest / bunBinaryName()
       else Task.dest / s"$moduleName.js"
 
-    if (bunCompileExecutable()) copyCompileResources(bunCompileResources(), cwd)
+    BunToolchainModule.copyWorkspace(compileDir, buildDir)
+    if (bunCompileExecutable()) copyCompileResources(bunCompileResources(), buildDir)
 
     val packagesExternal = if (bunBundlePackagesExternal()) Seq("--packages", "external") else Nil
     val externalArgs = bunBundleExternal().flatMap(dep => Seq("--external", dep))
@@ -180,8 +201,8 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
         "--format",
         bunBundleFormat()
       ) ++ packagesExternal ++ externalArgs ++ compileArgs ++ bunBuildArgs(),
-      cwd = cwd,
-      env = forkEnv()
+      cwd = buildDir,
+      env = bunToolEnv()
     )
 
     PathRef(outFile)
@@ -196,9 +217,11 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
     val targets = bunCompileTargets()
     if (targets.isEmpty) Task.fail("bunCompileTargets is empty. Set targets like Seq(\"bun-linux-x64\", \"bun-darwin-arm64\").")
 
-    val cwd = compile().path
-    val mainFile = mainFilePath().relativeTo(cwd).toString
-    copyCompileResources(bunCompileResources(), cwd)
+    val compileDir = compile().path
+    val buildDir = Task.dest / "workspace"
+    val mainFile = resolvedEntrypoint(mainFilePath(), compileDir).relativeTo(compileDir).toString
+    BunToolchainModule.copyWorkspace(compileDir, buildDir)
+    copyCompileResources(bunCompileResources(), buildDir)
 
     val packagesExternal = if (bunBundlePackagesExternal()) Seq("--packages", "external") else Nil
     val externalArgs = bunBundleExternal().flatMap(dep => Seq("--external", dep))
@@ -219,8 +242,8 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
           "--outfile",
           outFile.toString
         ) ++ packagesExternal ++ externalArgs ++ bunBuildArgs(),
-        cwd = cwd,
-        env = forkEnv()
+        cwd = buildDir,
+        env = bunToolEnv()
       )
 
       target -> PathRef(outFile)
@@ -254,7 +277,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
         bunExecutable(),
         Seq("install") ++ bunInstallArgs() ++ transitiveUnmanagedDeps().map(_.path.toString),
         cwd = dest,
-        env = forkEnv()
+        env = outer.bunToolEnv()
       )
 
       PathRef(dest)
@@ -282,7 +305,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
       os.call(
         Seq(bunExecutable(), "test") ++ resolvedTestFlags() ++ args.value,
         cwd = preparedTestWorkspace().path,
-        env = forkEnv(),
+        env = outer.bunRuntimeEnv(),
         stdout = os.Inherit,
         stderr = os.Inherit
       )
@@ -293,7 +316,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
       os.call(
         Seq(bunExecutable(), "test", "--watch") ++ resolvedTestFlags() ++ args.value,
         cwd = preparedTestWorkspace().path,
-        env = forkEnv(),
+        env = outer.bunRuntimeEnv(),
         stdout = os.Inherit,
         stderr = os.Inherit
       )
@@ -304,7 +327,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
       os.call(
         Seq(bunExecutable(), "test", "--update-snapshots") ++ resolvedTestFlags() ++ args.value,
         cwd = preparedTestWorkspace().path,
-        env = forkEnv(),
+        env = outer.bunRuntimeEnv(),
         stdout = os.Inherit,
         stderr = os.Inherit
       )
@@ -325,7 +348,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
           coverageDir.toString
         ) ++ coverageReporterArgs ++ resolvedTestFlags() ++ args.value,
         cwd = preparedTestWorkspace().path,
-        env = forkEnv(),
+        env = outer.bunRuntimeEnv(),
         stdout = os.Inherit,
         stderr = os.Inherit
       )
@@ -347,7 +370,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
           coverageDir.toString
         ) ++ coverageReporterArgs ++ resolvedTestFlags(),
         cwd = preparedTestWorkspace().path,
-        env = forkEnv()
+        env = outer.bunRuntimeEnv()
       )
 
       PathRef(coverageDir)

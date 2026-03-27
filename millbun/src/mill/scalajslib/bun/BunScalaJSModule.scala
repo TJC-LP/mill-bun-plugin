@@ -4,10 +4,14 @@ package bun
 import mill.*
 import mill.api.BuildCtx
 import mill.bun.BunToolchainModule
+import mill.javalib.JavaModule
 import mill.scalajslib.*
 import mill.scalajslib.api.*
+import mill.scalajslib.config.ScalaJSConfigModule
 
-trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule { outer =>
+import scala.annotation.tailrec
+
+trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { outer =>
 
   /** JS packages needed by linked Scala.js output, e.g. packages referenced by @JSImport. */
   def npmDeps: T[Seq[String]] = Task { Seq.empty }
@@ -17,6 +21,40 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule { outer =>
 
   /** Local tarballs / package directories. */
   def unmanagedDeps: T[Seq[PathRef]] = Task { Seq.empty }
+
+  private def recursiveBunModuleDeps: Seq[BunScalaJSModule] = {
+    @tailrec
+    def loop(
+        pending: List[JavaModule],
+        seen: Set[JavaModule],
+        acc: Vector[BunScalaJSModule]
+    ): Vector[BunScalaJSModule] = pending match {
+      case Nil => acc
+      case head :: tail if seen(head) =>
+        loop(tail, seen, acc)
+      case head :: tail =>
+        val next = head.moduleDepsChecked.toList ++ head.runModuleDepsChecked.toList ++ tail
+        val nextAcc = head match {
+          case bunModule: BunScalaJSModule => acc :+ bunModule
+          case _                           => acc
+        }
+        loop(next, seen + head, nextAcc)
+    }
+
+    loop(moduleDepsChecked.toList ++ runModuleDepsChecked.toList, Set.empty, Vector.empty)
+  }
+
+  def transitiveNpmDeps: T[Seq[String]] = Task {
+    Task.traverse(recursiveBunModuleDeps)(_.npmDeps)().flatten ++ npmDeps()
+  }
+
+  def transitiveNpmDevDeps: T[Seq[String]] = Task {
+    Task.traverse(recursiveBunModuleDeps)(_.npmDevDeps)().flatten ++ npmDevDeps()
+  }
+
+  def transitiveUnmanagedDeps: T[Seq[PathRef]] = Task {
+    Task.traverse(recursiveBunModuleDeps)(_.unmanagedDeps)().flatten ++ unmanagedDeps()
+  }
 
   /** Extra package.json fields not modeled by this scaffold. */
   def bunPackageJsonExtras: T[ujson.Obj] = Task { ujson.Obj() }
@@ -64,8 +102,8 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule { outer =>
       "name" -> defaultPackageName,
       "private" -> true,
       "version" -> "0.0.0",
-      "dependencies" -> ujson.Obj.from(npmDeps().map(BunToolchainModule.splitDep)),
-      "devDependencies" -> ujson.Obj.from(npmDevDeps().map(BunToolchainModule.splitDep))
+      "dependencies" -> ujson.Obj.from(transitiveNpmDeps().map(BunToolchainModule.splitDep)),
+      "devDependencies" -> ujson.Obj.from(transitiveNpmDevDeps().map(BunToolchainModule.splitDep))
     )
 
     val packageType =
@@ -95,7 +133,7 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule { outer =>
 
     runBun(
       bunExecutable(),
-      Seq("install") ++ bunInstallArgs() ++ unmanagedDeps().map(_.path.toString),
+      Seq("install") ++ bunInstallArgs() ++ transitiveUnmanagedDeps().map(_.path.toString),
       cwd = dest,
       env = bunEnv()
     )
@@ -129,27 +167,32 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule { outer =>
     )
   }
 
-  override def fastLinkJS: T[Report] = Task(persistent = true) {
-    val report = super.fastLinkJS()
-    ensureLinkedWorkspace(report, bunInstall().path, bunLockfiles())
-    report
-  }
-
-  override def fullLinkJS: T[Report] = Task(persistent = true) {
-    val report = super.fullLinkJS()
-    ensureLinkedWorkspace(report, bunInstall().path, bunLockfiles())
-    report
+  override protected def linkTask(isFullLinkJS: Boolean, forceOutJs: Boolean): Task[Report] = Task.Anon {
+    val linked = super.linkTask(isFullLinkJS, forceOutJs)()
+    ensureLinkedWorkspace(linked, bunInstall().path, bunLockfiles())
+    linked
   }
 
   protected def bundleEntrypoints(report: Report): Seq[os.Path] =
-    report.publicModules.toSeq.map(m => report.dest.path / m.jsFileName)
+    report.publicModules.toSeq.map(m => report.dest.path / m.jsFileName) match {
+      case Nil =>
+        throw new RuntimeException(
+          "No Scala.js public modules found in link output. bunBundle requires a public JS entrypoint, such as a main module initializer or JSExportTopLevel export."
+        )
+      case modules => modules
+    }
 
   protected def primaryEntrypoint(report: Report): os.Path = {
-    val module =
-      report.publicModules.find(_.moduleID == "main").orElse(report.publicModules.headOption).getOrElse {
-        throw new RuntimeException("No public Scala.js module found in link report.")
-      }
-    report.dest.path / module.jsFileName
+    report.publicModules.find(_.moduleID == "main").map(m => report.dest.path / m.jsFileName)
+      .orElse(report.publicModules.toSeq match {
+        case Seq(module) => Some(report.dest.path / module.jsFileName)
+        case _           => None
+      })
+      .getOrElse(
+        throw new RuntimeException(
+          "No unambiguous Scala.js entrypoint found. Configure a main module initializer or expose exactly one public JS module."
+        )
+      )
   }
 
   def bunBundle: T[PathRef] = Task {
@@ -159,7 +202,7 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule { outer =>
     os.makeDir.all(outDir)
 
     val formatArgs = bunBundleFormat().toSeq.flatMap(fmt => Seq("--format", fmt))
-    val sourcemapArgs = bunBundleSourcemap().toSeq.flatMap(mode => Seq("--sourcemap", mode))
+    val sourcemapArgs = bunBundleSourcemap().toSeq.map(mode => s"--sourcemap=$mode")
     val externalArgs = bunBundleExternal().flatMap(dep => Seq("--external", dep))
     val splittingArgs = if (bunBundleSplitting()) Seq("--splitting") else Nil
     val bytecodeArgs = if (bunBundleBytecode()) Seq("--bytecode") else Nil
@@ -189,7 +232,7 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule { outer =>
     os.makeDir.all(outDir)
 
     val formatArgs = bunBundleFormat().toSeq.flatMap(fmt => Seq("--format", fmt))
-    val sourcemapArgs = bunBundleSourcemap().toSeq.flatMap(mode => Seq("--sourcemap", mode))
+    val sourcemapArgs = bunBundleSourcemap().toSeq.map(mode => s"--sourcemap=$mode")
     val externalArgs = bunBundleExternal().flatMap(dep => Seq("--external", dep))
     val splittingArgs = if (bunBundleSplitting()) Seq("--splitting") else Nil
 
@@ -211,10 +254,7 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule { outer =>
   }
 
   private def copyCompileResources(resources: Seq[PathRef], dest: os.Path): Unit =
-    resources.foreach { ref =>
-      val p = ref.path
-      os.copy.over(p, dest / p.last, createFolders = true)
-    }
+    BunToolchainModule.copyPathRefs(resources, dest, Seq(moduleDir))
 
   /** Convenience task for server-side Scala.js entrypoints. */
   def bunCompileExecutable: T[PathRef] = Task {
@@ -224,7 +264,7 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule { outer =>
 
     val outFile = Task.dest / bunBinaryName()
     val formatArgs = bunBundleFormat().toSeq.flatMap(fmt => Seq("--format", fmt))
-    val sourcemapArgs = bunBundleSourcemap().toSeq.flatMap(mode => Seq("--sourcemap", mode))
+    val sourcemapArgs = bunBundleSourcemap().toSeq.map(mode => s"--sourcemap=$mode")
     val bytecodeArgs = if (bunBundleBytecode()) Seq("--bytecode") else Nil
 
     runBun(
@@ -255,7 +295,7 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule { outer =>
 
     val entry = primaryEntrypoint(linked).toString
     val formatArgs = bunBundleFormat().toSeq.flatMap(fmt => Seq("--format", fmt))
-    val sourcemapArgs = bunBundleSourcemap().toSeq.flatMap(mode => Seq("--sourcemap", mode))
+    val sourcemapArgs = bunBundleSourcemap().toSeq.map(mode => s"--sourcemap=$mode")
     val bytecodeArgs = if (bunBundleBytecode()) Seq("--bytecode") else Nil
     val binaryName = bunBinaryName()
 
@@ -278,11 +318,11 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule { outer =>
     }.toMap
   }
 
-  trait BunScalaJSTests extends ScalaJSTests {
-    override def fastLinkJSTest: T[Report] = Task(persistent = true) {
-      val report = super.fastLinkJSTest()
-      outer.ensureLinkedWorkspace(report, outer.bunInstall().path, outer.bunLockfiles())
-      report
+  trait BunScalaJSTests extends ScalaJSConfigTests {
+    override protected def testLinkTask: Task[Report] = Task.Anon {
+      val linked = super.testLinkTask()
+      outer.ensureLinkedWorkspace(linked, outer.bunInstall().path, outer.bunLockfiles())
+      linked
     }
 
     /** Run Bun tests in the linked Scala.js workspace. */

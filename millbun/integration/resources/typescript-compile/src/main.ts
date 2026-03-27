@@ -1,2 +1,3 @@
-const greeting: string = "Hello from compiled TypeScript executable!";
-console.log(greeting);
+import message from "../embedded/nested/message.txt" with { type: "text" };
+
+console.log(message.trim());
