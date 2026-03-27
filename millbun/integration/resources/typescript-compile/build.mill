@@ -1,0 +1,14 @@
+//| mill-version: 1.1.5
+//| mvnDeps:
+//| - com.tjclp::mill-bun_mill1:0.1.0-SNAPSHOT
+
+package build
+
+import mill.*
+import mill.javascriptlib.bun.*
+
+object app extends BunTypeScriptModule {
+  override def npmDevDeps = Task { Seq("typescript@5.7.3") }
+  override def bunCompileExecutable = Task { true }
+  override def bunBundleTarget = Task { "bun" }
+}

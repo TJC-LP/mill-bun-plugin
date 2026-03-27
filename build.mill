@@ -1,0 +1,54 @@
+package build
+
+import mill.*, scalalib.*, publish.*
+
+object millbun extends ScalaModule, PublishModule {
+  def millVersion = "1.1.5"
+  def scalaVersion = "3.8.2"
+  def jvmVersion = "25"
+  def platformSuffix = "_mill1"
+
+  def artifactName = "mill-bun"
+
+  def mvnDeps = Seq(
+    mvn"com.lihaoyi::mill-libs:$millVersion"
+  )
+
+  object test extends ScalaTests, TestModule.Utest {
+    def mvnDeps = Seq(
+      mvn"com.lihaoyi::utest:0.8.5"
+    )
+  }
+
+  object integration extends ScalaTests, TestModule.Utest {
+    def mvnDeps = Seq(
+      mvn"com.lihaoyi::mill-testkit:$millVersion",
+      mvn"com.lihaoyi::utest:0.8.5"
+    )
+    def forkEnv = Task {
+      val repos = Seq(publishLocalTestRepo().path.toNIO.toUri.toASCIIString) ++
+        Seq(Task.env.getOrElse("COURSIER_REPOSITORIES", "ivy2Local|central"))
+      Map(
+        "MILL_EXECUTABLE_PATH" -> millExecutable.assembly().path.toString,
+        "COURSIER_REPOSITORIES" -> repos.mkString("|")
+      )
+    }
+
+    object millExecutable extends JavaModule {
+      def mvnDeps = Seq(mvn"com.lihaoyi:mill-runner-launcher_3:$millVersion")
+      def mainClass = Some("mill.launcher.MillLauncherMain")
+    }
+  }
+
+  def publishVersion = "0.1.0-SNAPSHOT"
+  def pomSettings = PomSettings(
+    description = "Bun-backed Mill plugin for Scala.js and TypeScript workflows",
+    organization = "com.tjclp",
+    url = "https://github.com/tjc-lp/mill-bun-plugin",
+    licenses = Seq(License.MIT),
+    versionControl = VersionControl.github("tjc-lp", "mill-bun-plugin"),
+    developers = Seq(
+      Developer("tjc-lp", "TJC-LP", "", Some("https://github.com/tjc-lp"))
+    )
+  )
+}

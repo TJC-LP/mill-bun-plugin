@@ -1,0 +1,20 @@
+//| mill-version: 1.1.5
+//| mvnDeps:
+//| - com.tjclp::mill-bun_mill1:0.1.0-SNAPSHOT
+
+package build
+
+import mill.*
+import mill.scalajslib.*
+import mill.scalajslib.bun.*
+
+object app extends BunScalaJSModule {
+  def scalaVersion = "3.3.6"
+  def scalaJSVersion = "1.20.2"
+
+  override def moduleKind = Task { ModuleKind.ESModule }
+
+  override def npmDeps = Task { Seq("lodash@4.17.21") }
+
+  override def bunBundleTarget = Task { "bun" }
+}

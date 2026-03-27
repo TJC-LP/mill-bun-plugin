@@ -1,0 +1,11 @@
+out/
+.bsp/
+.idea/
+.metals/
+.vscode/
+.bloop/
+*.class
+*.tasty
+node_modules/
+.DS_Store
+.mill-jvm-version
