@@ -19,6 +19,14 @@ object BunScalaJSIntegrationTests extends TestSuite {
   private def outputPath(tester: IntegrationTester, selector: String): os.Path =
     tester.out(selector).value[PathRef].path
 
+  private def commandLogPath(tester: IntegrationTester, selector: String): os.Path = {
+    val segments = selector.split('.')
+    val rel =
+      if (segments.length <= 1) os.RelPath(".")
+      else os.RelPath(segments.dropRight(1).mkString("/"))
+    tester.workspacePath / "out" / rel / s"${segments.last}.log"
+  }
+
   private def bundledScript(dist: os.Path): os.Path =
     os.walk(dist)
       .find(path => os.isFile(path) && path.ext == "js")
@@ -36,6 +44,15 @@ object BunScalaJSIntegrationTests extends TestSuite {
       val tester = this.tester("scalajs-simple")
       val res = tester.eval("app.fastLinkJS")
       assert(res.isSuccess)
+    }
+
+    test("run") {
+      val tester = this.tester("scalajs-bundle")
+      val res = tester.eval("app.run")
+      assert(res.isSuccess)
+
+      val log = os.read(commandLogPath(tester, "app.run")).trim
+      assert(log == "Hello from scala.js with lodash on bun")
     }
 
     test("bunInstall") {
@@ -71,6 +88,12 @@ object BunScalaJSIntegrationTests extends TestSuite {
       val dist = outputPath(tester, "app.bunBundle")
       val mainJs = bundledScript(dist)
       assert(runBundledScript(mainJs) == "Hello from transitive scala.js bun")
+    }
+
+    test("bunTest") {
+      val tester = this.tester("scalajs-test")
+      val res = tester.eval("app.test.bunTest")
+      assert(res.isSuccess)
     }
   }
 }

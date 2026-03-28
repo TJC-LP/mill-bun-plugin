@@ -1,0 +1,21 @@
+//| mill-version: 1.1.5
+//| mill-jvm-version: system
+//| mvnDeps:
+//| - com.tjclp::mill-bun_mill1:0.1.0-SNAPSHOT
+
+package build
+
+import mill.*
+import mill.javascriptlib.bun.*
+
+object app extends BunTypeScriptModule {
+  override def moduleDir = build.moduleDir
+  override def enableEsm = Task { true }
+  override def bunBundleTarget = Task { "browser" }
+  override def compilerOptions = Task {
+    super.compilerOptions() ++ Map(
+      "module" -> ujson.Str("esnext"),
+      "moduleResolution" -> ujson.Str("bundler")
+    )
+  }
+}

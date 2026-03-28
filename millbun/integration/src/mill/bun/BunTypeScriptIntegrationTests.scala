@@ -19,6 +19,14 @@ object BunTypeScriptIntegrationTests extends TestSuite {
   private def outputPath(tester: IntegrationTester, selector: String): os.Path =
     tester.out(selector).value[PathRef].path
 
+  private def commandLogPath(tester: IntegrationTester, selector: String): os.Path = {
+    val segments = selector.split('.')
+    val rel =
+      if (segments.length <= 1) os.RelPath(".")
+      else os.RelPath(segments.dropRight(1).mkString("/"))
+    tester.workspacePath / "out" / rel / s"${segments.last}.log"
+  }
+
   def tests: Tests = Tests {
 
     test("compile") {
@@ -42,6 +50,15 @@ object BunTypeScriptIntegrationTests extends TestSuite {
       assert(run.out.text().trim == "Hello from bundled TypeScript resources!")
     }
 
+    test("run") {
+      val tester = this.tester("typescript-simple")
+      val res = tester.eval("app.run")
+      assert(res.isSuccess)
+
+      val log = os.read(commandLogPath(tester, "app.run")).trim
+      assert(log == "Hello from TypeScript on Bun!")
+    }
+
     test("compile-executable") {
       val tester = this.tester("typescript-compile")
       val res = tester.eval("app.bundle")
@@ -53,6 +70,57 @@ object BunTypeScriptIntegrationTests extends TestSuite {
         cwd = executable / os.up
       )
       assert(run.out.text().trim == "Hello from compiled TypeScript executable!")
+    }
+
+    test("bun target ambient types are pinned") {
+      val tester = this.tester("typescript-simple")
+      val res = tester.eval("app.npmInstall")
+      assert(res.isSuccess)
+
+      val packageJson = ujson.read(os.read(tester.workspacePath / "out" / "app" / "npmInstall.dest" / "package.json"))
+      val devDeps = packageJson("devDependencies").obj
+
+      assert(devDeps("@types/bun").str == "1.3.11")
+      assert(devDeps("@types/bun").str != "latest")
+      assert(!devDeps.contains("@types/node"))
+    }
+
+    test("browser target does not install node or bun ambient types") {
+      val tester = this.tester("typescript-browser")
+      val res = tester.eval("app.compile")
+      assert(res.isSuccess)
+
+      val packageJson = ujson.read(os.read(tester.workspacePath / "out" / "app" / "npmInstall.dest" / "package.json"))
+      val devDeps = packageJson("devDependencies").obj
+
+      assert(devDeps("typescript").str == "5.7.3")
+      assert(!devDeps.contains("@types/node"))
+      assert(!devDeps.contains("@types/bun"))
+    }
+
+    test("bun test module") {
+      val tester = this.tester("typescript-tests")
+      val res = tester.eval("app.test.test")
+      assert(res.isSuccess)
+    }
+
+    test("bundle workers") {
+      val tester = this.tester("typescript-workers")
+      val res = tester.eval("app.bundleWorkers")
+      assert(res.isSuccess)
+
+      val workersDir = outputPath(tester, "app.bundleWorkers")
+      val alphaWorker = workersDir / "src" / "workers" / "alpha" / "worker.js"
+      val betaWorker = workersDir / "src" / "workers" / "beta" / "worker.js"
+
+      assert(os.exists(alphaWorker))
+      assert(os.exists(betaWorker))
+
+      val alphaRun = os.call(Seq("bun", alphaWorker.last), cwd = alphaWorker / os.up)
+      val betaRun = os.call(Seq("bun", betaWorker.last), cwd = betaWorker / os.up)
+
+      assert(alphaRun.out.text().trim == "Alpha worker")
+      assert(betaRun.out.text().trim == "Beta worker")
     }
 
     test("bunEnv") {

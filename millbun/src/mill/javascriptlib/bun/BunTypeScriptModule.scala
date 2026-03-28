@@ -3,7 +3,6 @@ package bun
 
 import mill.*
 import os.*
-import mill.api.BuildCtx
 import mill.bun.BunToolchainModule
 
 trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { outer =>
@@ -44,10 +43,27 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
   /** Runtime environment for Bun-executed programs and tests. */
   protected def bunRuntimeEnv: T[Map[String, String]] = Task { bunEnv() ++ forkEnv() }
 
-  /** Mill's default TS deps assume ts-node/esbuild; Bun only needs TypeScript plus ambient types. */
+  /** TypeScript version used for `bun x tsc`. */
+  def typeScriptVersion: T[String] = Task { "5.7.3" }
+
+  /** Node ambient types used for node-targeted Bun builds. */
+  def nodeTypesVersion: T[String] = Task { "22.10.9" }
+
+  /** Bun ambient types used for bun-targeted Bun builds. */
+  def bunTypesVersion: T[String] = Task { "1.3.11" }
+
+  /** Ambient runtime types aligned to the configured Bun target. */
+  protected def ambientTypeDeps: T[Seq[String]] = Task {
+    bunBundleTarget() match {
+      case "bun" => Seq(s"@types/bun@${bunTypesVersion()}")
+      case "node" => Seq(s"@types/node@${nodeTypesVersion()}")
+      case _ => Seq.empty
+    }
+  }
+
+  /** Mill's default TS deps assume ts-node/esbuild; Bun only needs TypeScript plus target-specific ambient types. */
   override def tsDeps: T[Seq[String]] = Task {
-    Seq("typescript@5.7.3") ++
-      (if (bunBundleTarget() == "bun") Seq("@types/bun@latest") else Seq("@types/node@22.10.9"))
+    Seq(s"typescript@${typeScriptVersion()}") ++ ambientTypeDeps()
   }
 
   private def mkBunPackageJson: Task[Unit] = Task.Anon {
@@ -284,7 +300,8 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
     }
 
     protected def preparedTestWorkspace: T[PathRef] = Task {
-      val dest = this.compile().path
+      val dest = Task.dest
+      BunToolchainModule.copyWorkspace(this.compile().path, dest)
       outer.ensureInstallArtifacts(dest, npmInstall().path, bunLockfiles())
       PathRef(dest)
     }

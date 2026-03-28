@@ -39,6 +39,7 @@ object app extends BunScalaJSModule {
 ```
 
 `BunScalaJSModule` inherits Mill's bundled current Scala.js version, so you configure `scalaVersion` on the module but do not override `scalaJSVersion`. If you keep Scala.js sources at the build root such as `src/`, override `moduleDir = build.moduleDir`; otherwise Mill will look under `<module-name>/src`.
+`BunScalaJSTests` runs the Scala.js test bridge on Bun as the JS runtime. For ESM apps, the test linker falls back to CommonJS so Bun can execute the Scala.js test bridge without the temporary `file:` importer failure that affects `bun run -`.
 
 ### TypeScript
 
@@ -96,6 +97,18 @@ Extends `ScalaJSModule` with Bun runtime and bundling.
 | `bunBundleFast` | — | Fast bundle from `fastLinkJS` |
 | `bunCompileExecutable` | — | Standalone Bun executable |
 
+### `BunWorkersModule`
+
+Mix into a `BunTypeScriptModule` to bundle worker entry points from the staged compile workspace instead of raw source files.
+
+| Task | Default | Description |
+|------|---------|-------------|
+| `workerEntryPoints` | — | Worker sources to bundle |
+| `workerSourceRoots` | `Seq(moduleDir)` | Roots used to preserve worker output layout |
+| `workerBundleTarget` | `bunBundleTarget()` | `bun build --target` value for workers |
+| `workerBundleFormat` | `Some(bunBundleFormat())` | Optional worker bundle format |
+| `bundleWorkers` | — | Bundles all workers under `workers/` while preserving relative paths |
+
 ### `BunTypeScriptModule`
 
 Extends Mill's `TypeScriptModule`, replacing npm/node/esbuild with Bun.
@@ -114,10 +127,11 @@ When Mill's default `src/<module>.ts` entrypoint is absent, the Bun run/bundle t
 
 Overrides: `npmInstall` (bun install), `compile` (bun x tsc), `run` (bun run), `bundle` (bun build).
 Bundle outputs preserve the compiled workspace layout, including `resources/`, and `bunCompileResources` keep their relative paths beneath the module directory.
+Ambient typings are selected from `bunBundleTarget`: `bun` installs pinned `@types/bun`, `node` installs pinned `@types/node`, and `browser` installs neither.
 
 ## Examples
 
-See `example-scalajs/` and `example-typescript/` for complete consumer projects.
+See `example-scalajs/` and `example-typescript/` for complete consumer projects, and `examples/build.mill` for the broader multi-module example matrix used during development.
 
 ## Development
 

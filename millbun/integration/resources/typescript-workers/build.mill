@@ -1,0 +1,20 @@
+//| mill-version: 1.1.5
+//| mill-jvm-version: system
+//| mvnDeps:
+//| - com.tjclp::mill-bun_mill1:0.1.0-SNAPSHOT
+
+package build
+
+import mill.*
+import mill.bun.BunWorkersModule
+import mill.javascriptlib.bun.*
+
+object app extends BunTypeScriptModule with BunWorkersModule {
+  override def moduleDir = build.moduleDir
+  override def npmDeps = Task { Seq("lodash@4.17.21") }
+  override def npmDevDeps = Task { Seq("@types/lodash@4.17.20") }
+  override def workerEntryPoints = Task.Sources(
+    moduleDir / "src" / "workers" / "alpha" / "worker.ts",
+    moduleDir / "src" / "workers" / "beta" / "worker.ts"
+  )
+}

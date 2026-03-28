@@ -3,6 +3,7 @@ package bun
 
 import mill.*
 import mill.api.BuildCtx
+import mill.api.JsonFormatters.given
 import mill.bun.BunToolchainModule
 import mill.javalib.JavaModule
 import mill.scalajslib.*
@@ -10,7 +11,6 @@ import mill.scalajslib.api.*
 import mill.scalajslib.config.ScalaJSConfigModule
 
 import scala.annotation.tailrec
-
 trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { outer =>
 
   /** JS packages needed by linked Scala.js output, e.g. packages referenced by @JSImport. */
@@ -279,22 +279,24 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
   /** Convenience task for server-side Scala.js entrypoints. */
   def bunCompileExecutable: T[PathRef] = Task {
     val linked = fullLinkJS()
-    val cwd = linked.dest.path
-    copyCompileResources(bunCompileResources(), cwd)
+    val buildDir = Task.dest / "workspace"
+    BunToolchainModule.copyWorkspace(linked.dest.path, buildDir)
+    copyCompileResources(bunCompileResources(), buildDir)
 
     val outFile = Task.dest / bunBinaryName()
+    val entry = primaryEntrypoint(linked).relativeTo(linked.dest.path).toString
     val formatArgs = bunBundleFormat().toSeq.flatMap(fmt => Seq("--format", fmt))
     val sourcemapArgs = bunBundleSourcemap().toSeq.map(mode => s"--sourcemap=$mode")
     val bytecodeArgs = if (bunBundleBytecode()) Seq("--bytecode") else Nil
 
     runBun(
       bunExecutable(),
-      Seq("build", primaryEntrypoint(linked).toString, "--outfile", outFile.toString, "--compile", "--target", "bun") ++
+      Seq("build", entry, "--outfile", outFile.toString, "--compile", "--target", "bun") ++
         formatArgs ++
         sourcemapArgs ++
         bytecodeArgs ++
         bunBundleArgs(),
-      cwd = cwd,
+      cwd = buildDir,
       env = bunEnv()
     )
 
@@ -310,10 +312,11 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
     if (targets.isEmpty) Task.fail("bunCompileTargets is empty. Set targets like Seq(\"bun-linux-x64\", \"bun-darwin-arm64\").")
 
     val linked = fullLinkJS()
-    val cwd = linked.dest.path
-    copyCompileResources(bunCompileResources(), cwd)
+    val buildDir = Task.dest / "workspace"
+    BunToolchainModule.copyWorkspace(linked.dest.path, buildDir)
+    copyCompileResources(bunCompileResources(), buildDir)
 
-    val entry = primaryEntrypoint(linked).toString
+    val entry = primaryEntrypoint(linked).relativeTo(linked.dest.path).toString
     val formatArgs = bunBundleFormat().toSeq.flatMap(fmt => Seq("--format", fmt))
     val sourcemapArgs = bunBundleSourcemap().toSeq.map(mode => s"--sourcemap=$mode")
     val bytecodeArgs = if (bunBundleBytecode()) Seq("--bytecode") else Nil
@@ -330,7 +333,7 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
           sourcemapArgs ++
           bytecodeArgs ++
           bunBundleArgs(),
-        cwd = cwd,
+        cwd = buildDir,
         env = bunEnv()
       )
 
@@ -339,22 +342,46 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
   }
 
   trait BunScalaJSTests extends ScalaJSConfigTests {
-    override protected def testLinkTask: Task[Report] = Task.Anon {
-      val linked = super.testLinkTask()
-      outer.ensureLinkedWorkspace(linked, outer.bunInstall().path, outer.bunLockfiles())
-      linked
+    override def moduleKind: T[ModuleKind] = Task {
+      outer.moduleKind() match {
+        // Bun rejects the temporary file:-URL importer that Scala.js' Node env
+        // generates for ES module test runs, so keep test linking on CommonJS.
+        case ModuleKind.ESModule => ModuleKind.CommonJSModule
+        case other               => other
+      }
     }
 
-    /** Run Bun tests in the linked Scala.js workspace. */
-    def bunTest(args: mill.api.Args): Command[os.CommandResult] = Task.Command {
-      val report = fastLinkJSTest()
-      os.call(
-        Seq(outer.bunExecutable(), "test") ++ args.value,
-        cwd = report.dest.path,
-        env = outer.bunEnv(),
-        stdout = os.Inherit,
-        stderr = os.Inherit
-      )
+    override protected def testLinkTask: Task[Report] = Task.Anon {
+      val linkConfig =
+        outer.moduleKind() match {
+          case ModuleKind.ESModule =>
+            outer.scalaJSConfig().withModuleKind(org.scalajs.linker.interface.ModuleKind.CommonJSModule)
+          case _ =>
+            outer.scalaJSConfig()
+        }
+
+      linkJs(
+        worker = mill.scalajslib.config.worker.ScalaJSConfigWorkerExternalModule.scalaJSWorker(),
+        toolsClasspath = scalaJSToolsClasspath(),
+        runClasspath = scalaJSTestDeps() ++ runClasspath(),
+        moduleInitializers = testModuleInitializers(),
+        forceOutJs = false,
+        testBridgeInit = true,
+        importMap = scalaJSImportMap(),
+        config = linkConfig
+      ).map { linked =>
+        outer.ensureLinkedWorkspace(linked, outer.bunInstall().path, outer.bunLockfiles())
+        linked
+      }
     }
+
+    /** Run Scala.js tests through Mill's test bridge with Bun as the JS runtime. */
+    def bunTest(args: mill.api.Args): Command[(msg: String, results: Seq[mill.javalib.testrunner.TestResult])] =
+      Task.Command {
+        testTask(
+          Task.Anon { testArgsDefault() ++ args.value },
+          Task.Anon { Seq.empty[String] }
+        )()
+      }
   }
 }
