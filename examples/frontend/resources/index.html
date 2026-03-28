@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Mill + Bun + Scala.js Todo</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 420px; margin: 40px auto; padding: 0 16px; }
+    h1 { color: #333; }
+    .input-row { display: flex; gap: 8px; }
+    #todo-input { flex: 1; padding: 8px; font-size: 14px; }
+    #add-btn { padding: 8px 16px; cursor: pointer; }
+    ul { list-style: none; padding: 0; }
+    li {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 8px 0; border-bottom: 1px solid #eee;
+    }
+    li.done span { text-decoration: line-through; color: #999; }
+    li span { cursor: pointer; flex: 1; }
+    li button { cursor: pointer; border: none; background: none; color: #c33; font-size: 18px; }
+    #counter { margin-top: 12px; color: #666; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>Todo List</h1>
+  <div class="input-row">
+    <input id="todo-input" placeholder="What needs doing?" autofocus />
+    <button id="add-btn">Add</button>
+  </div>
+  <ul id="todo-list"></ul>
+  <div id="counter"></div>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

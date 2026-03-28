@@ -1,0 +1,62 @@
+//| mill-version: 1.1.5
+//| mill-jvm-version: system
+//| mvnDeps:
+//| - com.tjclp::mill-bun_mill1:0.1.0-SNAPSHOT
+
+package build
+
+import mill.*
+import mill.scalalib.*
+import mill.scalajslib.*
+import mill.scalajslib.api.*
+import mill.scalajslib.bun.*
+
+// --- Web Server (Bun.serve HTTP server) ---
+// ./mill webServer.run                    # start on :3000
+// ./mill webServer.bunBundle              # bundle for bun runtime
+// ./mill webServer.bunCompileExecutable   # standalone binary
+object webServer extends BunScalaJSModule {
+  override def sources = Task.Sources(build.moduleDir / "web-server" / "src")
+  def scalaVersion = "3.8.2"
+  override def moduleKind = Task { ModuleKind.ESModule }
+  override def bunBundleTarget = Task { "bun" }
+}
+
+// --- Frontend Todo App (browser bundle) ---
+// ./mill todoApp.bunBundle   # browser-ready JS in dist/
+object todoApp extends BunScalaJSModule {
+  override def sources = Task.Sources(build.moduleDir / "frontend" / "src")
+  def scalaVersion = "3.8.2"
+  def mvnDeps = Seq(mvn"org.scala-js::scalajs-dom::2.8.1")
+  override def moduleKind = Task { ModuleKind.ESModule }
+  override def bunBundleTarget = Task { "browser" }
+}
+
+// --- Fullstack (shared types + Bun server + browser frontend) ---
+// ./mill fullstack.server.run               # start API on :3000
+// ./mill fullstack.frontend.bunBundle       # bundle frontend JS
+// ./mill fullstack.__.compile               # type-check everything
+object fullstack extends Module {
+  object shared extends BunScalaJSModule {
+    override def sources = Task.Sources(build.moduleDir / "fullstack" / "shared")
+    def scalaVersion = "3.8.2"
+    override def moduleKind = Task { ModuleKind.ESModule }
+  }
+
+  object server extends BunScalaJSModule {
+    override def sources = Task.Sources(build.moduleDir / "fullstack" / "server")
+    def scalaVersion = shared.scalaVersion
+    override def moduleKind = Task { ModuleKind.ESModule }
+    override def moduleDeps = Seq(shared)
+    override def bunBundleTarget = Task { "bun" }
+  }
+
+  object frontend extends BunScalaJSModule {
+    override def sources = Task.Sources(build.moduleDir / "fullstack" / "frontend")
+    def scalaVersion = shared.scalaVersion
+    override def moduleKind = Task { ModuleKind.ESModule }
+    override def moduleDeps = Seq(shared)
+    def mvnDeps = Seq(mvn"org.scala-js::scalajs-dom::2.8.1")
+    override def bunBundleTarget = Task { "browser" }
+  }
+}

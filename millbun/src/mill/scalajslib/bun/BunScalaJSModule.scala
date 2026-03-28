@@ -167,6 +167,26 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
     )
   }
 
+  /** Run the linked Scala.js output directly with Bun.
+    *
+    * Overrides the inherited `run` which uses NodeJSEnv's stdin-pipe mechanism.
+    * NodeJSEnv creates a temp bootstrap script that `import()`s the linked output
+    * via `file:` URLs, but Bun rejects cross-sandbox `file:` URL imports.
+    * This override invokes `bun run <entrypoint>` directly in the linked output
+    * directory, which already has `node_modules` symlinked from `bunInstall`.
+    */
+  override def run(args: Task[mill.api.Args] = Task.Anon(mill.api.Args(Nil))): Command[Unit] = Task.Command {
+    val linked = fastLinkJS()
+    val entry = primaryEntrypoint(linked)
+    runBun(
+      bunExecutable(),
+      Seq("run", entry.toString) ++ args().value,
+      cwd = linked.dest.path,
+      env = bunJsEnv()
+    )
+    ()
+  }
+
   override protected def linkTask(isFullLinkJS: Boolean, forceOutJs: Boolean): Task[Report] = Task.Anon {
     val linked = super.linkTask(isFullLinkJS, forceOutJs)()
     ensureLinkedWorkspace(linked, bunInstall().path, bunLockfiles())

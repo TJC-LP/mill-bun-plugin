@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Mill + Bun + Scala.js Fullstack</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 480px; margin: 40px auto; padding: 0 16px; }
+    h1 { color: #333; }
+    section { margin: 24px 0; }
+    .row { display: flex; gap: 8px; margin-bottom: 12px; }
+    input { flex: 1; padding: 8px; font-size: 14px; }
+    button { padding: 8px 16px; cursor: pointer; }
+    #result, #counter { padding: 12px; background: #f5f5f5; border-radius: 6px; min-height: 20px; }
+  </style>
+</head>
+<body>
+  <h1>Fullstack Scala.js</h1>
+
+  <section>
+    <h2>Greeting</h2>
+    <div class="row">
+      <input id="name-input" placeholder="Enter your name" autofocus />
+      <button id="greet-btn">Greet</button>
+    </div>
+    <div id="result">Type a name and click Greet</div>
+  </section>
+
+  <section>
+    <h2>Counter</h2>
+    <button id="counter-btn">Increment</button>
+    <div id="counter">Click to start counting</div>
+  </section>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
