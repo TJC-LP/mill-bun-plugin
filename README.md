@@ -141,6 +141,8 @@ See `example-scalajs/` and `example-typescript/` for complete consumer projects,
 ./mill millbun.integration   # Integration tests (requires Bun on PATH)
 ```
 
+See `docs/RELEASING.md` for the tag-driven Maven Central release workflow.
+
 ## License
 
 MIT
