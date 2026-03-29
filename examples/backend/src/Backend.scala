@@ -1,5 +1,8 @@
 package backend
 
+import java.nio.charset.StandardCharsets
+import scala.util.Using
+
 object Backend extends cask.MainRoutes {
   override def port: Int = sys.env.getOrElse("PORT", "8080").toInt
 
@@ -13,8 +16,13 @@ object Backend extends cask.MainRoutes {
 
   @cask.get("/")
   def index(): cask.Response[String] = {
-    val stream = getClass.getClassLoader.getResourceAsStream("webapp/index.html")
-    val html = new String(stream.readAllBytes(), "UTF-8")
+    val html = Option(getClass.getClassLoader.getResourceAsStream("webapp/index.html"))
+      .map { stream =>
+        Using.resource(stream) { resource =>
+          new String(resource.readAllBytes(), StandardCharsets.UTF_8)
+        }
+      }
+      .getOrElse(throw new java.io.FileNotFoundException("webapp/index.html"))
     cask.Response(data = html, headers = Seq("Content-Type" -> "text/html"))
   }
 
