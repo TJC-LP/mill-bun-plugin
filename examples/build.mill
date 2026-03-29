@@ -10,11 +10,16 @@ import mill.scalalib.*
 import mill.scalajslib.*
 import mill.scalajslib.api.*
 import mill.scalajslib.bun.*
+import mill.javascriptlib.bun.*
+
+// ============================================================================
+// Scala.js Examples
+// ============================================================================
 
 // --- Web Server (Bun.serve HTTP server) ---
-// ./mill webServer.run                    # start on :3000
-// ./mill webServer.bunBundle              # bundle for bun runtime
-// ./mill webServer.bunCompileExecutable   # standalone binary
+// ./mill webServer.run
+// ./mill webServer.bunBundle
+// ./mill webServer.bunCompileExecutable
 object webServer extends BunScalaJSModule {
   override def sources = Task.Sources(build.moduleDir / "web-server" / "src")
   def scalaVersion = "3.8.2"
@@ -23,7 +28,7 @@ object webServer extends BunScalaJSModule {
 }
 
 // --- Frontend Todo App (browser bundle) ---
-// ./mill todoApp.bunBundle   # browser-ready JS in dist/
+// ./mill todoApp.bunBundle
 object todoApp extends BunScalaJSModule {
   override def sources = Task.Sources(build.moduleDir / "frontend" / "src")
   def scalaVersion = "3.8.2"
@@ -33,9 +38,9 @@ object todoApp extends BunScalaJSModule {
 }
 
 // --- Fullstack (shared types + Bun server + browser frontend) ---
-// ./mill fullstack.server.run               # start API on :3000
-// ./mill fullstack.frontend.bunBundle       # bundle frontend JS
-// ./mill fullstack.__.compile               # type-check everything
+// ./mill fullstack.server.run
+// ./mill fullstack.frontend.bunBundle
+// ./mill fullstack.__.compile
 object fullstack extends Module {
   object shared extends BunScalaJSModule {
     override def sources = Task.Sources(build.moduleDir / "fullstack" / "shared")
@@ -58,5 +63,65 @@ object fullstack extends Module {
     override def moduleDeps = Seq(shared)
     def mvnDeps = Seq(mvn"org.scala-js::scalajs-dom::2.8.1")
     override def bunBundleTarget = Task { "browser" }
+  }
+}
+
+// ============================================================================
+// Polyglot — TypeScript + Scala JVM + Scala.js in one build
+// ============================================================================
+//
+// Idiomatic Mill layout: directories match module names, sources at <module>/src/.
+// No moduleDir or sources overrides needed.
+//
+//   ./mill tsLib.compile                  # TypeScript type-check
+//   ./mill tsLib.test.test                # Bun-native tests
+//   ./mill client.bundle                  # TS browser bundle (imports tsLib)
+//   ./mill scalaClient.bunBundle          # Scala.js browser bundle
+//   ./mill backend.run                    # JVM Cask server on :8080
+//   ./mill __.compile                     # compile EVERYTHING
+
+// --- TypeScript utility library ---
+object tsLib extends BunTypeScriptModule {
+  object test extends BunTypeScriptTests
+}
+
+// --- TypeScript browser frontend (uses tsLib via moduleDeps) ---
+object client extends BunTypeScriptModule {
+  override def moduleDeps = Seq(tsLib)
+  override def enableEsm = Task { true }
+  override def bunBundleTarget = Task { "browser" }
+  override def compilerOptions = Task {
+    super.compilerOptions() ++ Map(
+      "module" -> ujson.Str("esnext"),
+      "moduleResolution" -> ujson.Str("bundler"),
+      "target" -> ujson.Str("es2020"),
+      "lib" -> ujson.Arr("es2020", "dom")
+    )
+  }
+}
+
+// --- Scala.js browser frontend (alternative client) ---
+object scalaClient extends BunScalaJSModule {
+  def scalaVersion = "3.8.2"
+  def mvnDeps = Seq(mvn"org.scala-js::scalajs-dom::2.8.1")
+  override def moduleKind = Task { ModuleKind.ESModule }
+  override def bunBundleTarget = Task { "browser" }
+}
+
+// --- JVM backend (Scala/Cask HTTP server, serves TS client bundle) ---
+object backend extends ScalaModule {
+  def scalaVersion = "3.8.2"
+  def mvnDeps = Seq(
+    mvn"com.lihaoyi::cask:0.10.2",
+    mvn"com.lihaoyi::upickle:4.3.0"
+  )
+  override def resources = Task {
+    os.makeDir.all(Task.dest / "webapp")
+    os.copy(client.bundle().path, Task.dest / "webapp" / "client.js")
+    // Find index.html from client's resources task (sandbox-safe)
+    val clientRes = client.resources().map(_.path)
+    clientRes.flatMap(r => os.walk(r).filter(_.last == "index.html")).headOption
+      .foreach(html => os.copy(html, Task.dest / "webapp" / "index.html"))
+    super.resources() ++ Seq(PathRef(Task.dest))
   }
 }
