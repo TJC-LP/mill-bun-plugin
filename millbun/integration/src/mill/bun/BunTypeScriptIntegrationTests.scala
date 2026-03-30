@@ -132,7 +132,7 @@ object BunTypeScriptIntegrationTests extends TestSuite {
       assert(log.contains("Hello from TSX"))
     }
 
-    test("bunfig propagates to compile workspace") {
+    test("bunfig propagates to compile workspace without leaking .npmrc") {
       val tester = this.tester("typescript-bunfig")
       val res = tester.eval("app.compile")
       assert(res.isSuccess)
@@ -140,10 +140,12 @@ object BunTypeScriptIntegrationTests extends TestSuite {
       val installDir = tester.workspacePath / "out" / "app" / "npmInstall.dest"
       val compileDir = tester.workspacePath / "out" / "app" / "compile.dest"
 
-      // bunfig should be in the install workspace
+      // Install workspace keeps both configs.
+      assert(os.exists(installDir / ".npmrc"))
       assert(os.exists(installDir / "bunfig.toml"))
-      // bunfig should propagate to compile workspace
+      // Compile workspace should only get bunfig.
       assert(os.exists(compileDir / "bunfig.toml"))
+      assert(!os.exists(compileDir / ".npmrc"))
     }
 
     test("test deps are devDependencies") {
@@ -162,6 +164,7 @@ object BunTypeScriptIntegrationTests extends TestSuite {
       val testPkg = ujson.read(os.read(tester.workspacePath / "out" / "app" / "test" / "npmInstall.dest" / "package.json"))
       assert(testPkg("devDependencies").obj.contains("is-odd"))
       assert(!testPkg("dependencies").obj.contains("is-odd"))
+      assert(!testPkg("devDependencies").obj.contains("is-even"))
       // Outer deps should also be present
       assert(testPkg("dependencies").obj.contains("is-even"))
 

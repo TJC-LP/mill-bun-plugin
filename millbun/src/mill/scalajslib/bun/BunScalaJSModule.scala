@@ -22,6 +22,8 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
   /** Local tarballs / package directories. */
   def unmanagedDeps: T[Seq[PathRef]] = Task { Seq.empty }
 
+  private def npmRc = Task.Source(BuildCtx.workspaceRoot / ".npmrc")
+
   private def recursiveBunModuleDeps: Seq[BunScalaJSModule] = {
     @tailrec
     def loop(
@@ -122,8 +124,7 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
     val dest = Task.dest
     os.makeDir.all(dest)
 
-    val npmrc = BuildCtx.workspaceRoot / ".npmrc"
-    if (os.exists(npmrc)) os.copy.over(npmrc, dest / ".npmrc", createFolders = true)
+    if (os.exists(npmRc().path)) os.copy.over(npmRc().path, dest / ".npmrc", createFolders = true)
 
     bunfigFiles().foreach { cfg =>
       os.copy.over(cfg.path, dest / cfg.path.last, createFolders = true)

@@ -9,5 +9,6 @@ import mill.*
 import mill.javascriptlib.bun.*
 
 object app extends BunTypeScriptModule {
-  override def moduleDir = build.moduleDir
+  // Keep bunfig/.npmrc at the workspace root so the test proves explicit propagation.
+  override def moduleDir = build.moduleDir / "app"
 }

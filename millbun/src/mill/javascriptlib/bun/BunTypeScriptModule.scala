@@ -137,6 +137,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
     tscCopyModDeps()
     tscCopyGenSources()
     tscLinkResources()
+    BunTypeScriptModule.removeInstallOnlyConfigs(Task.dest)
     ensureInstallArtifacts(Task.dest, npmInstall().path, bunLockfiles())
     BunTypeScriptModule.copyBunfigsTo(Task.dest, resolvedBunfigs())
     mkTsconfig()
@@ -205,6 +206,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
       else Task.dest / s"$moduleName.js"
 
     BunToolchainModule.copyWorkspace(compileDir, buildDir)
+    BunTypeScriptModule.removeInstallOnlyConfigs(buildDir)
     BunTypeScriptModule.copyBunfigsTo(buildDir, resolvedBunfigs())
     if (bunCompileExecutable()) copyCompileResources(bunCompileResources(), buildDir)
 
@@ -244,6 +246,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
     val buildDir = Task.dest / "workspace"
     val mainFile = resolvedEntrypoint(mainFilePath(), compileDir).relativeTo(compileDir).toString
     BunToolchainModule.copyWorkspace(compileDir, buildDir)
+    BunTypeScriptModule.removeInstallOnlyConfigs(buildDir)
     BunTypeScriptModule.copyBunfigsTo(buildDir, resolvedBunfigs())
     copyCompileResources(bunCompileResources(), buildDir)
 
@@ -302,9 +305,12 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
       val user = outer.packageJson()
       val outerDeps = outer.transitiveNpmDeps().map(BunToolchainModule.splitDep)
       val outerDevDeps = (outer.transitiveNpmDevDeps() ++ outer.tsDeps()).map(BunToolchainModule.splitDep)
+      val outerPackageNames = (outerDeps.iterator ++ outerDevDeps.iterator).map(_._1).toSet
       // Test-only deps are dev dependencies — they should not appear in the
       // production dependencies field, matching Bun/npm convention.
-      val testDevDeps = (transitiveNpmDeps() ++ transitiveNpmDevDeps() ++ this.tsDeps()).map(BunToolchainModule.splitDep)
+      val testDevDeps = (transitiveNpmDeps() ++ transitiveNpmDevDeps() ++ this.tsDeps())
+        .map(BunToolchainModule.splitDep)
+        .filterNot { case (name, _) => outerPackageNames.contains(name) }
 
       val resolved = ujson.Obj.from(
         user.copy(
@@ -334,6 +340,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
     protected def preparedTestWorkspace: T[PathRef] = Task {
       val dest = Task.dest
       BunToolchainModule.copyWorkspace(this.compile().path, dest)
+      BunTypeScriptModule.removeInstallOnlyConfigs(dest)
       outer.ensureInstallArtifacts(dest, npmInstall().path, bunLockfiles())
       BunTypeScriptModule.copyBunfigsTo(dest, outer.resolvedBunfigs())
       PathRef(dest)
@@ -435,5 +442,11 @@ object BunTypeScriptModule {
     bunfigConfigs.foreach { cfg =>
       os.copy.over(cfg.path, dest / cfg.path.last, createFolders = true)
     }
+  }
+
+  /** Generated Bun run/build/test workspaces should not retain install-only auth config. */
+  def removeInstallOnlyConfigs(dest: os.Path): Unit = {
+    val npmrc = dest / ".npmrc"
+    if (os.exists(npmrc)) os.remove(npmrc)
   }
 }
