@@ -49,7 +49,10 @@ object millbun extends ScalaModule, PublishModule {
     }
   }
 
-  def publishVersion = "0.1.0-SNAPSHOT"
+  // CI injects release versions via PUBLISH_VERSION; local builds stay on SNAPSHOT.
+  def publishVersion: T[String] = Task {
+    Task.env.getOrElse("PUBLISH_VERSION", "0.1.0-SNAPSHOT")
+  }
   def pomSettings = PomSettings(
     description = "Bun-backed Mill plugin for Scala.js and TypeScript workflows",
     organization = "com.tjclp",
@@ -57,7 +60,7 @@ object millbun extends ScalaModule, PublishModule {
     licenses = Seq(License.MIT),
     versionControl = VersionControl.github("tjc-lp", "mill-bun-plugin"),
     developers = Seq(
-      Developer("tjc-lp", "TJC-LP", "", Some("https://github.com/tjc-lp"))
+      Developer("tjc-lp", "TJC-LP", "https://github.com/tjc-lp")
     )
   )
 }
