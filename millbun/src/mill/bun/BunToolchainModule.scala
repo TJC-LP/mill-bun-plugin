@@ -16,17 +16,18 @@ object BunToolchainModule {
       (parts(0), ujson.Str(parts.lift(1).getOrElse("")))
   }
 
+  /** Build candidate executable names from a base name and PATHEXT extensions.
+   *  PATHEXT is Windows-specific and always semicolon-delimited regardless of platform. */
+  def executableCandidates(name: String, pathExt: String): Seq[String] = {
+    val extensions = pathExt.split(";").filter(_.nonEmpty)
+    if (extensions.nonEmpty) Seq(name) ++ extensions.map(ext => name + ext.toLowerCase)
+    else Seq(name)
+  }
+
   /** Resolve an executable name from PATH, respecting PATHEXT on Windows. */
   def findOnPath(name: String): Option[os.Path] = {
     val pathDirs = sys.env.getOrElse("PATH", "").split(java.io.File.pathSeparator)
-    val extensions = sys.env.getOrElse("PATHEXT", "")
-      .split(java.io.File.pathSeparator)
-      .filter(_.nonEmpty)
-
-    val candidates = if (extensions.nonEmpty)
-      Seq(name) ++ extensions.map(ext => name + ext.toLowerCase)
-    else
-      Seq(name)
+    val candidates = executableCandidates(name, sys.env.getOrElse("PATHEXT", ""))
 
     pathDirs.iterator
       .flatMap(dir => candidates.iterator.map(c => os.Path(dir) / c))
@@ -97,8 +98,11 @@ trait BunToolchainModule extends Module {
    *
    * Bun works without a bunfig, but copying root configs makes the generated
    * task workspaces closer to the source workspace.
+   *
+   * Declared as Task.Input so Mill's sandbox checker allows reading from the
+   * workspace root and re-evaluates when the files change.
    */
-  def bunfigFiles: T[Seq[PathRef]] = Task {
+  def bunfigFiles: T[Seq[PathRef]] = Task.Input {
     Seq(BuildCtx.workspaceRoot / "bunfig.toml", BuildCtx.workspaceRoot / ".bunfig.toml")
       .filter(os.exists)
       .map(PathRef(_))

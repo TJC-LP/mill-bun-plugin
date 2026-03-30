@@ -1,0 +1,3 @@
+# Marker bunfig for integration test — verifies propagation to workspaces
+[install]
+auto = "disable"
