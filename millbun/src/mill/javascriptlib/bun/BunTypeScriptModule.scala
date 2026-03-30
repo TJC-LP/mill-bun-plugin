@@ -84,15 +84,16 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
     os.write.over(dest / "package.json", merged.render(indent = 2), createFolders = true)
   }
 
-  private def copyBunWorkspaceConfigs: Task[Unit] = Task.Anon {
-    val dest = Task.dest
-    if (os.exists(npmRc().path)) {
-      os.copy.over(npmRc().path, dest / ".npmrc", createFolders = true)
-    }
+  private def resolvedBunfigs: Task[Seq[PathRef]] = Task.Anon {
+    bunfigFiles()
+  }
 
-    bunfigFiles().foreach { cfg =>
-      os.copy.over(cfg.path, dest / cfg.path.last, createFolders = true)
+  private def copyBunWorkspaceConfigs: Task[Unit] = Task.Anon {
+    // Install workspaces need both .npmrc (registry auth) and bunfig
+    if (os.exists(npmRc().path)) {
+      os.copy.over(npmRc().path, Task.dest / ".npmrc", createFolders = true)
     }
+    BunTypeScriptModule.copyBunfigsTo(Task.dest, bunfigFiles())
   }
 
   private def ensureInstallArtifacts(dest: os.Path, installRoot: os.Path, lockfiles: Seq[String]): Unit = {
@@ -137,6 +138,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
     tscCopyGenSources()
     tscLinkResources()
     ensureInstallArtifacts(Task.dest, npmInstall().path, bunLockfiles())
+    BunTypeScriptModule.copyBunfigsTo(Task.dest, resolvedBunfigs())
     mkTsconfig()
 
     runBun(
@@ -181,9 +183,13 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
     val candidates = Seq(
       configured,
       compileDir / "src" / "main.ts",
+      compileDir / "src" / "main.tsx",
       compileDir / "src" / "index.ts",
+      compileDir / "src" / "index.tsx",
       compileDir / "main.ts",
-      compileDir / "index.ts"
+      compileDir / "main.tsx",
+      compileDir / "index.ts",
+      compileDir / "index.tsx"
     ).distinct
 
     candidates.find(os.exists).getOrElse(configured)
@@ -199,6 +205,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
       else Task.dest / s"$moduleName.js"
 
     BunToolchainModule.copyWorkspace(compileDir, buildDir)
+    BunTypeScriptModule.copyBunfigsTo(buildDir, resolvedBunfigs())
     if (bunCompileExecutable()) copyCompileResources(bunCompileResources(), buildDir)
 
     val packagesExternal = if (bunBundlePackagesExternal()) Seq("--packages", "external") else Nil
@@ -237,6 +244,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
     val buildDir = Task.dest / "workspace"
     val mainFile = resolvedEntrypoint(mainFilePath(), compileDir).relativeTo(compileDir).toString
     BunToolchainModule.copyWorkspace(compileDir, buildDir)
+    BunTypeScriptModule.copyBunfigsTo(buildDir, resolvedBunfigs())
     copyCompileResources(bunCompileResources(), buildDir)
 
     val packagesExternal = if (bunBundlePackagesExternal()) Seq("--packages", "external") else Nil
@@ -286,12 +294,36 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
     override def npmInstall: T[PathRef] = Task {
       val dest = Task.dest
       os.makeDir.all(dest)
-      outer.mkBunPackageJson()
+
+      // Merge outer + test-side deps into a single package.json.
+      // Upstream Mill's test npmInstall runs `npm install --save-dev` with the
+      // test module's transitive deps; we achieve the same by building one
+      // merged package.json before `bun install`.
+      val user = outer.packageJson()
+      val outerDeps = outer.transitiveNpmDeps().map(BunToolchainModule.splitDep)
+      val outerDevDeps = (outer.transitiveNpmDevDeps() ++ outer.tsDeps()).map(BunToolchainModule.splitDep)
+      // Test-only deps are dev dependencies — they should not appear in the
+      // production dependencies field, matching Bun/npm convention.
+      val testDevDeps = (transitiveNpmDeps() ++ transitiveNpmDevDeps() ++ this.tsDeps()).map(BunToolchainModule.splitDep)
+
+      val resolved = ujson.Obj.from(
+        user.copy(
+          name = if (user.name.nonEmpty) user.name else outer.moduleName,
+          version = if (user.version.nonEmpty) user.version else "1.0.0",
+          `type` = if (outer.enableEsm()) "module" else user.`type`,
+          dependencies = ujson.Obj.from(outerDeps),
+          devDependencies = ujson.Obj.from(outerDevDeps ++ testDevDeps)
+        ).cleanJson.obj.toSeq
+      )
+
+      val merged = ujson.Obj.from(resolved.value.toSeq ++ outer.bunPackageJsonExtras().value.toSeq)
+      os.write.over(dest / "package.json", merged.render(indent = 2), createFolders = true)
+
       outer.copyBunWorkspaceConfigs()
 
       runBun(
         bunExecutable(),
-        Seq("install") ++ bunInstallArgs() ++ transitiveUnmanagedDeps().map(_.path.toString),
+        Seq("install") ++ bunInstallArgs() ++ (outer.transitiveUnmanagedDeps() ++ transitiveUnmanagedDeps()).distinct.map(_.path.toString),
         cwd = dest,
         env = outer.bunToolEnv()
       )
@@ -303,6 +335,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
       val dest = Task.dest
       BunToolchainModule.copyWorkspace(this.compile().path, dest)
       outer.ensureInstallArtifacts(dest, npmInstall().path, bunLockfiles())
+      BunTypeScriptModule.copyBunfigsTo(dest, outer.resolvedBunfigs())
       PathRef(dest)
     }
 
@@ -391,6 +424,16 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
       )
 
       PathRef(coverageDir)
+    }
+  }
+}
+
+object BunTypeScriptModule {
+
+  /** Copy bunfig files into a workspace directory. Does NOT copy .npmrc — that belongs only in install workspaces. */
+  def copyBunfigsTo(dest: os.Path, bunfigConfigs: Seq[PathRef]): Unit = {
+    bunfigConfigs.foreach { cfg =>
+      os.copy.over(cfg.path, dest / cfg.path.last, createFolders = true)
     }
   }
 }

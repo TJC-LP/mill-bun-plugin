@@ -16,11 +16,20 @@ object BunToolchainModule {
       (parts(0), ujson.Str(parts.lift(1).getOrElse("")))
   }
 
-  /** Resolve an executable name from PATH. */
+  /** Resolve an executable name from PATH, respecting PATHEXT on Windows. */
   def findOnPath(name: String): Option[os.Path] = {
     val pathDirs = sys.env.getOrElse("PATH", "").split(java.io.File.pathSeparator)
+    val extensions = sys.env.getOrElse("PATHEXT", "")
+      .split(java.io.File.pathSeparator)
+      .filter(_.nonEmpty)
+
+    val candidates = if (extensions.nonEmpty)
+      Seq(name) ++ extensions.map(ext => name + ext.toLowerCase)
+    else
+      Seq(name)
+
     pathDirs.iterator
-      .map(dir => os.Path(dir) / name)
+      .flatMap(dir => candidates.iterator.map(c => os.Path(dir) / c))
       .find(os.exists(_))
   }
 
