@@ -51,7 +51,7 @@ object millbun extends ScalaModule, PublishModule {
 
   // CI injects release versions via PUBLISH_VERSION; local builds stay on SNAPSHOT.
   def publishVersion: T[String] = Task {
-    Task.env.getOrElse("PUBLISH_VERSION", "0.1.0-SNAPSHOT")
+    Task.env.getOrElse("PUBLISH_VERSION", "0.0.0-NIGHTLY")
   }
   def pomSettings = PomSettings(
     description = "Bun-backed Mill plugin for Scala.js and TypeScript workflows",

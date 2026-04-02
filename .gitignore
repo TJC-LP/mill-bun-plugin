@@ -9,3 +9,4 @@ out/
 node_modules/
 .DS_Store
 .mill-jvm-version
+.claude/plans/

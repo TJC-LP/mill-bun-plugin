@@ -39,12 +39,12 @@ Before tagging a release:
 
 Update these locations before cutting the release tag:
 
-- `build.mill`
 - `README.md`
 - `example-typescript/build.mill`
 - `example-scalajs/build.mill`
 - `examples/build.mill`
-- `millbun/integration/resources/**/build.mill`
+
+Do **not** sweep `millbun/integration/resources/**/build.mill` — those use a fixed `0.0.0-NIGHTLY` version that resolves against the locally published artifact (via `publishLocalTestRepo`), not Maven Central.
 
 After the release is published, bump `main` to the next snapshot version when new development starts.
 
