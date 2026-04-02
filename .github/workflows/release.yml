@@ -112,7 +112,7 @@ jobs:
           MILL_SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
           MILL_PGP_SECRET_BASE64: ${{ secrets.PGP_SECRET }}
           MILL_PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}
-        run: ./mill --no-server -i mill.javalib.SonatypeCentralPublishModule/
+        run: ./mill -i mill.javalib.SonatypeCentralPublishModule/
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
