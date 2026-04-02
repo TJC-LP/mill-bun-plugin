@@ -18,7 +18,7 @@ Keeps Mill's task graph, module structure, caching, Scala.js linker integration,
 //| mill-version: 1.1.5
 //| mill-jvm-version: system
 //| mvnDeps:
-//| - com.tjclp::mill-bun_mill1:0.1.0-SNAPSHOT
+//| - com.tjclp::mill-bun_mill1:0.1.0
 
 package build
 
@@ -47,7 +47,7 @@ object app extends BunScalaJSModule {
 //| mill-version: 1.1.5
 //| mill-jvm-version: system
 //| mvnDeps:
-//| - com.tjclp::mill-bun_mill1:0.1.0-SNAPSHOT
+//| - com.tjclp::mill-bun_mill1:0.1.0
 
 package build
 
