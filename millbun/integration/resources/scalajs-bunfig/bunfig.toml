@@ -1,0 +1,3 @@
+# Marker bunfig for integration test — verifies propagation to Scala.js workspaces
+[install]
+auto = "disable"

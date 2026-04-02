@@ -1,0 +1,21 @@
+//| mill-version: 1.1.5
+//| mill-jvm-version: system
+//| mvnDeps:
+//| - com.tjclp::mill-bun_mill1:0.1.0-SNAPSHOT
+
+package build
+
+import mill.*
+import mill.javascriptlib.bun.*
+
+object app extends BunTypeScriptModule {
+  override def moduleDir = build.moduleDir
+
+  // Production dependency
+  override def npmDeps = Task { Seq("is-even@1.0.0") }
+
+  object test extends BunTypeScriptTests {
+    // Test-only dependency — should land in devDependencies, not dependencies
+    override def npmDeps = Task { Seq("is-odd@3.0.1") }
+  }
+}

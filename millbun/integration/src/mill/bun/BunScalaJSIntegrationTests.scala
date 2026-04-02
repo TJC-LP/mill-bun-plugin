@@ -95,5 +95,34 @@ object BunScalaJSIntegrationTests extends TestSuite {
       val res = tester.eval("app.test.bunTest")
       assert(res.isSuccess)
     }
+
+    test("bunfig propagates to Scala.js workspaces without leaking .npmrc") {
+      val tester = this.tester("scalajs-bunfig")
+
+      val installRes = tester.eval("app.bunInstall")
+      assert(installRes.isSuccess)
+      val installDir = tester.workspacePath / "out" / "app" / "bunInstall.dest"
+      assert(os.exists(installDir / ".npmrc"))
+      assert(os.exists(installDir / "bunfig.toml"))
+
+      val linkRes = tester.eval("app.fastLinkJS")
+      assert(linkRes.isSuccess)
+      val linkedDir = tester.workspacePath / "out" / "app" / "fastLinkJS.dest"
+      assert(os.exists(linkedDir / "bunfig.toml"))
+      assert(!os.exists(linkedDir / ".npmrc"))
+
+      val compileRes = tester.eval("app.bunCompileExecutable")
+      assert(compileRes.isSuccess)
+      val compileWorkspace = tester.workspacePath / "out" / "app" / "bunCompileExecutable.dest" / "workspace"
+      assert(os.exists(compileWorkspace / "bunfig.toml"))
+      assert(!os.exists(compileWorkspace / ".npmrc"))
+
+      val testRes = tester.eval("app.test.bunTest")
+      assert(testRes.isSuccess)
+      val testRoot = tester.workspacePath / "out" / "app" / "test"
+      assert(os.exists(testRoot))
+      assert(os.walk(testRoot).exists(_.last == "bunfig.toml"))
+      assert(!os.walk(testRoot).exists(_.last == ".npmrc"))
+    }
   }
 }

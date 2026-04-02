@@ -22,6 +22,8 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
   /** Local tarballs / package directories. */
   def unmanagedDeps: T[Seq[PathRef]] = Task { Seq.empty }
 
+  private def npmRc = Task.Source(BuildCtx.workspaceRoot / ".npmrc")
+
   private def recursiveBunModuleDeps: Seq[BunScalaJSModule] = {
     @tailrec
     def loop(
@@ -122,8 +124,7 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
     val dest = Task.dest
     os.makeDir.all(dest)
 
-    val npmrc = BuildCtx.workspaceRoot / ".npmrc"
-    if (os.exists(npmrc)) os.copy.over(npmrc, dest / ".npmrc", createFolders = true)
+    if (os.exists(npmRc().path)) os.copy.over(npmRc().path, dest / ".npmrc", createFolders = true)
 
     bunfigFiles().foreach { cfg =>
       os.copy.over(cfg.path, dest / cfg.path.last, createFolders = true)
@@ -141,7 +142,11 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
     PathRef(dest)
   }
 
-  private def ensureLinkedWorkspace(report: Report, installDir: os.Path, lockfiles: Seq[String]): Unit = {
+  private def resolvedBunConfigs: Task[Seq[PathRef]] = Task.Anon {
+    bunfigFiles()
+  }
+
+  private def ensureLinkedWorkspace(report: Report, installDir: os.Path, lockfiles: Seq[String], bunConfigs: Seq[PathRef]): Unit = {
     val linkedDir = report.dest.path
 
     os.copy.over(installDir / "package.json", linkedDir / "package.json", createFolders = true)
@@ -155,6 +160,10 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
       if (os.exists(src) && !os.exists(linkedDir / name)) {
         os.symlink(linkedDir / name, src)
       }
+    }
+
+    bunConfigs.foreach { cfg =>
+      os.copy.over(cfg.path, linkedDir / cfg.path.last, createFolders = true)
     }
   }
 
@@ -189,7 +198,7 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
 
   override protected def linkTask(isFullLinkJS: Boolean, forceOutJs: Boolean): Task[Report] = Task.Anon {
     val linked = super.linkTask(isFullLinkJS, forceOutJs)()
-    ensureLinkedWorkspace(linked, bunInstall().path, bunLockfiles())
+    ensureLinkedWorkspace(linked, bunInstall().path, bunLockfiles(), resolvedBunConfigs())
     linked
   }
 
@@ -281,6 +290,7 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
     val linked = fullLinkJS()
     val buildDir = Task.dest / "workspace"
     BunToolchainModule.copyWorkspace(linked.dest.path, buildDir)
+    resolvedBunConfigs().foreach(cfg => os.copy.over(cfg.path, buildDir / cfg.path.last, createFolders = true))
     copyCompileResources(bunCompileResources(), buildDir)
 
     val outFile = Task.dest / bunBinaryName()
@@ -314,6 +324,7 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
     val linked = fullLinkJS()
     val buildDir = Task.dest / "workspace"
     BunToolchainModule.copyWorkspace(linked.dest.path, buildDir)
+    resolvedBunConfigs().foreach(cfg => os.copy.over(cfg.path, buildDir / cfg.path.last, createFolders = true))
     copyCompileResources(bunCompileResources(), buildDir)
 
     val entry = primaryEntrypoint(linked).relativeTo(linked.dest.path).toString
@@ -370,7 +381,7 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
         importMap = scalaJSImportMap(),
         config = linkConfig
       ).map { linked =>
-        outer.ensureLinkedWorkspace(linked, outer.bunInstall().path, outer.bunLockfiles())
+        outer.ensureLinkedWorkspace(linked, outer.bunInstall().path, outer.bunLockfiles(), outer.resolvedBunConfigs())
         linked
       }
     }

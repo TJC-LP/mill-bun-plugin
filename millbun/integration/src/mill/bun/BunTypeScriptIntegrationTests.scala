@@ -123,6 +123,56 @@ object BunTypeScriptIntegrationTests extends TestSuite {
       assert(betaRun.out.text().trim == "Beta worker")
     }
 
+    test("tsx entrypoint fallback") {
+      val tester = this.tester("typescript-tsx")
+      val res = tester.eval("app.run")
+      assert(res.isSuccess)
+
+      val log = os.read(commandLogPath(tester, "app.run")).trim
+      assert(log.contains("Hello from TSX"))
+    }
+
+    test("bunfig propagates to compile workspace without leaking .npmrc") {
+      val tester = this.tester("typescript-bunfig")
+      val res = tester.eval("app.compile")
+      assert(res.isSuccess)
+
+      val installDir = tester.workspacePath / "out" / "app" / "npmInstall.dest"
+      val compileDir = tester.workspacePath / "out" / "app" / "compile.dest"
+
+      // Install workspace keeps both configs.
+      assert(os.exists(installDir / ".npmrc"))
+      assert(os.exists(installDir / "bunfig.toml"))
+      // Compile workspace should only get bunfig.
+      assert(os.exists(compileDir / "bunfig.toml"))
+      assert(!os.exists(compileDir / ".npmrc"))
+    }
+
+    test("test deps are devDependencies") {
+      val tester = this.tester("typescript-test-deps")
+
+      // Outer module should have is-even in dependencies
+      val outerRes = tester.eval("app.npmInstall")
+      assert(outerRes.isSuccess)
+      val outerPkg = ujson.read(os.read(tester.workspacePath / "out" / "app" / "npmInstall.dest" / "package.json"))
+      assert(outerPkg("dependencies").obj.contains("is-even"))
+      assert(!outerPkg("dependencies").obj.contains("is-odd"))
+
+      // Test module should have is-odd in devDependencies (not dependencies)
+      val testRes = tester.eval("app.test.npmInstall")
+      assert(testRes.isSuccess)
+      val testPkg = ujson.read(os.read(tester.workspacePath / "out" / "app" / "test" / "npmInstall.dest" / "package.json"))
+      assert(testPkg("devDependencies").obj.contains("is-odd"))
+      assert(!testPkg("dependencies").obj.contains("is-odd"))
+      assert(!testPkg("devDependencies").obj.contains("is-even"))
+      // Outer deps should also be present
+      assert(testPkg("dependencies").obj.contains("is-even"))
+
+      // Tests should actually run (both deps available)
+      val runRes = tester.eval("app.test.test")
+      assert(runRes.isSuccess)
+    }
+
     test("bunEnv") {
       val tester = this.tester("typescript-env")
       val res = tester.eval("app.bundle")
