@@ -13,11 +13,34 @@ import mill.scalajslib.config.ScalaJSConfigModule
 import scala.annotation.tailrec
 trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { outer =>
 
-  /** JS packages needed by linked Scala.js output, e.g. packages referenced by @JSImport. */
-  def npmDeps: T[Seq[String]] = Task { Seq.empty }
+  /** JS packages needed by linked Scala.js output, e.g. packages referenced by @JSImport.
+    *
+    * Preferred: use `bunDeps` with the `bun"pkg@version"` interpolator.
+    * This alias exists for backward compatibility.
+    */
+  def npmDeps: T[Seq[String]] = Task { bunDeps() }
+
+  /** Dev-only JS packages for bundling or local tooling.
+    *
+    * Preferred: use `bunDevDeps` with the `bun"pkg@version"` interpolator.
+    * This alias exists for backward compatibility.
+    */
+  def npmDevDeps: T[Seq[String]] = Task { bunDevDeps() }
+
+  /** JS packages needed by linked Scala.js output.
+    *
+    * Use the `bun"pkg@version"` string interpolator for compile-time validation:
+    * {{{
+    * def bunDeps = Task { Seq(
+    *   bun"@anthropic-ai/claude-agent-sdk@^0.2.90",
+    *   bun"zod@^4.0.0"
+    * )}
+    * }}}
+    */
+  def bunDeps: T[Seq[String]] = Task { Seq.empty }
 
   /** Dev-only JS packages for bundling or local tooling. */
-  def npmDevDeps: T[Seq[String]] = Task { Seq.empty }
+  def bunDevDeps: T[Seq[String]] = Task { Seq.empty }
 
   /** Local tarballs / package directories. */
   def unmanagedDeps: T[Seq[PathRef]] = Task { Seq.empty }
@@ -127,12 +150,24 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
   }
 
   /** Resource paths that include the bun dependency manifest.
-    * Libraries should include this in their `resources` to ship manifests in published JARs.
+    *
+    * Automatically appended to `resources` — library authors don't need to
+    * wire this manually. When `bunDeps`/`npmDeps` is non-empty, the manifest
+    * and lockfile are embedded in the published JAR.
     */
   def bunDependencyManifestResources: T[Seq[PathRef]] = Task {
-    if npmDeps().nonEmpty || npmDevDeps().nonEmpty || bunOptionalDeps().nonEmpty then
+    if npmDeps().nonEmpty || bunOptionalDeps().nonEmpty then
       Seq(bunDependencyManifest())
     else Seq.empty
+  }
+
+  /** Auto-include bun dependency manifest in JAR resources.
+    *
+    * No manual wiring needed. If this module declares `bunDeps` / `npmDeps`,
+    * the manifest and lockfile are automatically embedded when the JAR is built.
+    */
+  override def resources: T[Seq[PathRef]] = Task {
+    super.resources() ++ bunDependencyManifestResources()
   }
 
   /** Extra package.json fields not modeled by this scaffold. */
