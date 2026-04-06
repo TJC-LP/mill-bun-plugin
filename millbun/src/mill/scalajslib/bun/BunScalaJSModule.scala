@@ -13,19 +13,11 @@ import mill.scalajslib.config.ScalaJSConfigModule
 import scala.annotation.tailrec
 trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { outer =>
 
-  /** JS packages needed by linked Scala.js output, e.g. packages referenced by @JSImport.
-    *
-    * Preferred: use `bunDeps` with the `bun"pkg@version"` interpolator.
-    * This alias exists for backward compatibility.
-    */
-  def npmDeps: T[Seq[String]] = Task { bunDeps() }
+  /** JS packages needed by linked Scala.js output, e.g. packages referenced by @JSImport. */
+  def npmDeps: T[Seq[String]] = Task { Seq.empty }
 
-  /** Dev-only JS packages for bundling or local tooling.
-    *
-    * Preferred: use `bunDevDeps` with the `bun"pkg@version"` interpolator.
-    * This alias exists for backward compatibility.
-    */
-  def npmDevDeps: T[Seq[String]] = Task { bunDevDeps() }
+  /** Dev-only JS packages for bundling or local tooling. */
+  def npmDevDeps: T[Seq[String]] = Task { Seq.empty }
 
   /** JS packages needed by linked Scala.js output.
     *
@@ -36,10 +28,16 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
     *   bun"zod@^4.0.0"
     * )}
     * }}}
+    *
+    * Both `bunDeps` and `npmDeps` are merged into `transitiveNpmDeps` —
+    * use whichever you prefer. They are independent (no delegation).
     */
   def bunDeps: T[Seq[String]] = Task { Seq.empty }
 
-  /** Dev-only JS packages for bundling or local tooling. */
+  /** Dev-only JS packages for bundling or local tooling.
+    *
+    * Independent of `npmDevDeps` — both are merged into `transitiveNpmDevDeps`.
+    */
   def bunDevDeps: T[Seq[String]] = Task { Seq.empty }
 
   /** Local tarballs / package directories. */
@@ -70,15 +68,17 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
   }
 
   def transitiveNpmDeps: T[Seq[String]] = Task {
-    val moduleDeps = Task.traverse(recursiveBunModuleDeps)(_.npmDeps)().flatten
+    val moduleNpm = Task.traverse(recursiveBunModuleDeps)(_.npmDeps)().flatten
+    val moduleBun = Task.traverse(recursiveBunModuleDeps)(_.bunDeps)().flatten
     val jarDeps = classpathBunDeps()
-    moduleDeps ++ jarDeps ++ npmDeps()
+    moduleNpm ++ moduleBun ++ jarDeps ++ npmDeps() ++ bunDeps()
   }
 
   def transitiveNpmDevDeps: T[Seq[String]] = Task {
-    val moduleDeps = Task.traverse(recursiveBunModuleDeps)(_.npmDevDeps)().flatten
+    val moduleNpm = Task.traverse(recursiveBunModuleDeps)(_.npmDevDeps)().flatten
+    val moduleBun = Task.traverse(recursiveBunModuleDeps)(_.bunDevDeps)().flatten
     val jarDevDeps = classpathBunDevDeps()
-    moduleDeps ++ jarDevDeps ++ npmDevDeps()
+    moduleNpm ++ moduleBun ++ jarDevDeps ++ npmDevDeps() ++ bunDevDeps()
   }
 
   def transitiveUnmanagedDeps: T[Seq[PathRef]] = Task {
@@ -119,55 +119,6 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
         BunManifest.extractLockfile(path, Task.dest).map(PathRef(_)).toSeq
       else Nil
     }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Manifest generation — for embedding in published JARs
-  // ---------------------------------------------------------------------------
-
-  /** Generate bun dependency manifest + lockfile for inclusion in published JARs.
-    *
-    * The manifest declares this library's JS package requirements so that
-    * consumers automatically get them via `classpathBunDeps`. The lockfile
-    * is embedded alongside for deterministic resolution seeding.
-    */
-  def bunDependencyManifest: T[PathRef] = Task {
-    val deps = npmDeps().map(BunToolchainModule.splitDep).map((k, v) => k -> v.str).toMap
-    val devDeps = npmDevDeps().map(BunToolchainModule.splitDep).map((k, v) => k -> v.str).toMap
-    val optDeps = bunOptionalDeps().map(BunToolchainModule.splitDep).map((k, v) => k -> v.str).toMap
-    val manifest = BunManifest(deps, devDeps, optDeps)
-    val metaDir = Task.dest / "META-INF" / "bun"
-    os.write(metaDir / "bun-dependencies.json", BunManifest.toJson(manifest).render(indent = 2), createFolders = true)
-
-    // Embed the lockfile if available
-    val installDir = bunInstall().path
-    bunLockfiles().foreach { name =>
-      val lockfile = installDir / name
-      if os.exists(lockfile) then os.copy.over(lockfile, metaDir / name, createFolders = true)
-    }
-
-    PathRef(Task.dest)
-  }
-
-  /** Resource paths that include the bun dependency manifest.
-    *
-    * Automatically appended to `resources` — library authors don't need to
-    * wire this manually. When `bunDeps`/`npmDeps` is non-empty, the manifest
-    * and lockfile are embedded in the published JAR.
-    */
-  def bunDependencyManifestResources: T[Seq[PathRef]] = Task {
-    if npmDeps().nonEmpty || bunOptionalDeps().nonEmpty then
-      Seq(bunDependencyManifest())
-    else Seq.empty
-  }
-
-  /** Auto-include bun dependency manifest in JAR resources.
-    *
-    * No manual wiring needed. If this module declares `bunDeps` / `npmDeps`,
-    * the manifest and lockfile are automatically embedded when the JAR is built.
-    */
-  override def resources: T[Seq[PathRef]] = Task {
-    super.resources() ++ bunDependencyManifestResources()
   }
 
   /** Extra package.json fields not modeled by this scaffold. */
