@@ -102,6 +102,11 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
     classpathBunManifests().flatMap(_.devDependencies).map { case (name, version) => s"$name@$version" }
   }
 
+  /** Scan classpath JARs for embedded bun optional-dependency manifests. */
+  def classpathBunOptionalDeps: T[Seq[String]] = Task {
+    classpathBunManifests().flatMap(_.optionalDependencies).map { case (name, version) => s"$name@$version" }
+  }
+
   private def classpathBunManifests: Task[Seq[BunManifest]] = Task.Anon {
     runClasspath().flatMap { ref =>
       val path = ref.path
@@ -151,9 +156,15 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
     if (name.nonEmpty) name.split('.').last.replace('.', '-') else "app"
   }
 
+  def transitiveBunOptionalDeps: T[Seq[String]] = Task {
+    val moduleOptional = Task.traverse(recursiveBunModuleDeps)(_.bunOptionalDeps)().flatten
+    val jarOptional = classpathBunOptionalDeps()
+    moduleOptional ++ jarOptional ++ bunOptionalDeps()
+  }
+
   private def mkBunPackageJson: Task[Unit] = Task.Anon {
     val dest = Task.dest
-    val allOptional = bunOptionalDeps().map(BunToolchainModule.splitDep)
+    val allOptional = transitiveBunOptionalDeps().map(BunToolchainModule.splitDep)
     val base = ujson.Obj(
       "name" -> defaultPackageName,
       "private" -> true,

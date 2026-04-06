@@ -35,11 +35,14 @@ trait BunPublishModule extends BunScalaJSModule {
 
   /** Resource paths that include the bun dependency manifest.
     *
-    * When this module declares any JS deps, the manifest and lockfile
-    * are embedded in the published JAR.
+    * When this module declares any JS deps, the manifest
+    * is embedded in the published JAR.
     */
   def bunDependencyManifestResources: T[Seq[PathRef]] = Task {
-    if npmDeps().nonEmpty || bunDeps().nonEmpty || bunOptionalDeps().nonEmpty then
+    if npmDeps().nonEmpty || bunDeps().nonEmpty ||
+        npmDevDeps().nonEmpty || bunDevDeps().nonEmpty ||
+        bunOptionalDeps().nonEmpty
+    then
       Seq(bunDependencyManifest())
     else Seq.empty
   }
