@@ -30,14 +30,6 @@ trait BunPublishModule extends BunScalaJSModule {
     val manifest = BunManifest(allDeps, allDevDeps, optDeps)
     val metaDir = Task.dest / "META-INF" / "bun"
     os.write(metaDir / "bun-dependencies.json", BunManifest.toJson(manifest).render(indent = 2), createFolders = true)
-
-    // Embed the lockfile if available
-    val installDir = bunInstall().path
-    bunLockfiles().foreach { name =>
-      val lockfile = installDir / name
-      if os.exists(lockfile) then os.copy.over(lockfile, metaDir / name, createFolders = true)
-    }
-
     PathRef(Task.dest)
   }
 

@@ -87,44 +87,26 @@ object BunManifestTests extends TestSuite {
       assert(result.get.dependencies("react") == "^19.0.0")
     }
 
-    test("JAR round-trip: write manifest and lockfile, read back") {
+    test("JAR round-trip: write manifest, read back") {
       val tmpDir = os.temp.dir()
 
-      // Create a JAR with manifest and lockfile
       val jarPath = tmpDir / "test-lib.jar"
       val manifestContent = BunManifest.toJson(
         BunManifest(Map("react" -> "^19.0.0"), Map.empty, Map.empty)
       ).render()
-      val lockContent = "# bun lockfile\nreact@^19.0.0: resolved=19.1.0"
 
       val jarOut = new java.util.jar.JarOutputStream(
         new java.io.FileOutputStream(jarPath.toIO)
       )
       try {
-        // Write manifest entry
         jarOut.putNextEntry(new java.util.jar.JarEntry(BunManifest.ManifestPath))
         jarOut.write(manifestContent.getBytes("UTF-8"))
         jarOut.closeEntry()
-
-        // Write lockfile entry
-        jarOut.putNextEntry(new java.util.jar.JarEntry(BunManifest.LockfilePath))
-        jarOut.write(lockContent.getBytes("UTF-8"))
-        jarOut.closeEntry()
       } finally jarOut.close()
 
-      // Read manifest back
       val manifest = BunManifest.readFromJar(jarPath)
       assert(manifest.isDefined)
       assert(manifest.get.dependencies("react") == "^19.0.0")
-
-      // Extract lockfile
-      val extractDir = tmpDir / "extract"
-      os.makeDir.all(extractDir)
-      val lockfile = BunManifest.extractLockfile(jarPath, extractDir)
-      assert(lockfile.isDefined)
-      assert(os.exists(lockfile.get))
-      val content = os.read(lockfile.get)
-      assert(content.contains("react"))
     }
 
     test("readFromJar returns None for JAR without manifest") {
@@ -142,9 +124,6 @@ object BunManifestTests extends TestSuite {
 
       val manifest = BunManifest.readFromJar(jarPath)
       assert(manifest.isEmpty)
-
-      val lockfile = BunManifest.extractLockfile(jarPath, tmpDir / "extract")
-      assert(lockfile.isEmpty)
     }
 
     test("readFromJar returns None for nonexistent path") {

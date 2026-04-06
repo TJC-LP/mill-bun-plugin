@@ -111,16 +111,6 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
     }
   }
 
-  /** Extract embedded lockfiles from classpath JARs for deterministic resolution. */
-  def classpathBunLockfiles: T[Seq[PathRef]] = Task {
-    runClasspath().flatMap { ref =>
-      val path = ref.path
-      if os.exists(path) && path.ext == "jar" then
-        BunManifest.extractLockfile(path, Task.dest).map(PathRef(_)).toSeq
-      else Nil
-    }
-  }
-
   /** Extra package.json fields not modeled by this scaffold. */
   def bunPackageJsonExtras: T[ujson.Obj] = Task { ujson.Obj() }
 
@@ -197,14 +187,6 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
     }
 
     mkBunPackageJson()
-
-    // Seed lockfile from classpath JARs if no local lockfile exists yet.
-    // This gives bun a known-good resolution baseline from library authors.
-    val localLockExists = bunLockfiles().exists(name => os.exists(dest / name))
-    if !localLockExists then
-      classpathBunLockfiles().headOption.foreach { ref =>
-        os.copy.over(ref.path, dest / "bun.lock", createFolders = true)
-      }
 
     runBun(
       bunExecutable(),

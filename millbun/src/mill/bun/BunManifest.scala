@@ -13,7 +13,6 @@ import java.util.jar.JarFile
   * Layout inside JAR:
   * {{{
   * META-INF/bun/bun-dependencies.json   — dependency manifest
-  * META-INF/bun/bun.lock                — lockfile (optional, for deterministic resolution)
   * }}}
   */
 final case class BunManifest(
@@ -24,7 +23,6 @@ final case class BunManifest(
 
 object BunManifest:
   val ManifestPath = "META-INF/bun/bun-dependencies.json"
-  val LockfilePath = "META-INF/bun/bun.lock"
 
   val empty: BunManifest = BunManifest(Map.empty, Map.empty, Map.empty)
 
@@ -72,28 +70,6 @@ object BunManifest:
       try Some(fromJson(ujson.read(os.read(manifestFile))))
       catch case _: Exception => None
     else None
-
-  /** Extract the embedded lockfile from a JAR to a destination directory.
-    * Returns the path to the extracted lockfile, or None if no lockfile is embedded.
-    */
-  def extractLockfile(jarPath: os.Path, destDir: os.Path): Option[os.Path] =
-    if !os.exists(jarPath) then return None
-    val jar = new JarFile(jarPath.toIO)
-    try
-      val entry = jar.getEntry(LockfilePath)
-      if entry == null then None
-      else
-        // Use JAR filename to namespace lockfiles from different libraries
-        val namespace = jarPath.last.stripSuffix(".jar")
-        val dest = destDir / namespace / "bun.lock"
-        os.makeDir.all(dest / os.up)
-        val is = jar.getInputStream(entry)
-        try
-          os.write.over(dest, is)
-          Some(dest)
-        finally is.close()
-    catch case _: Exception => None
-    finally jar.close()
 
   /** Merge multiple manifests into one. Later entries override earlier ones for the same package. */
   def merge(manifests: Seq[BunManifest]): BunManifest =
