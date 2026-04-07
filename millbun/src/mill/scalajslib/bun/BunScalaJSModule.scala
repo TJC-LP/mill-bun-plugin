@@ -4,7 +4,7 @@ package bun
 import mill.*
 import mill.api.BuildCtx
 import mill.api.JsonFormatters.given
-import mill.bun.BunToolchainModule
+import mill.bun.{BunManifest, BunToolchainModule}
 import mill.javalib.JavaModule
 import mill.scalajslib.*
 import mill.scalajslib.api.*
@@ -18,6 +18,27 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
 
   /** Dev-only JS packages for bundling or local tooling. */
   def npmDevDeps: T[Seq[String]] = Task { Seq.empty }
+
+  /** JS packages needed by linked Scala.js output.
+    *
+    * Use the `bun"pkg@version"` string interpolator for compile-time validation:
+    * {{{
+    * def bunDeps = Task { Seq(
+    *   bun"@anthropic-ai/claude-agent-sdk@^0.2.90",
+    *   bun"zod@^4.0.0"
+    * )}
+    * }}}
+    *
+    * Both `bunDeps` and `npmDeps` are merged into `transitiveNpmDeps` —
+    * use whichever you prefer. They are independent (no delegation).
+    */
+  def bunDeps: T[Seq[String]] = Task { Seq.empty }
+
+  /** Dev-only JS packages for bundling or local tooling.
+    *
+    * Independent of `npmDevDeps` — both are merged into `transitiveNpmDevDeps`.
+    */
+  def bunDevDeps: T[Seq[String]] = Task { Seq.empty }
 
   /** Local tarballs / package directories. */
   def unmanagedDeps: T[Seq[PathRef]] = Task { Seq.empty }
@@ -47,15 +68,52 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
   }
 
   def transitiveNpmDeps: T[Seq[String]] = Task {
-    Task.traverse(recursiveBunModuleDeps)(_.npmDeps)().flatten ++ npmDeps()
+    val moduleNpm = Task.traverse(recursiveBunModuleDeps)(_.npmDeps)().flatten
+    val moduleBun = Task.traverse(recursiveBunModuleDeps)(_.bunDeps)().flatten
+    val jarDeps = classpathBunDeps()
+    moduleNpm ++ moduleBun ++ jarDeps ++ npmDeps() ++ bunDeps()
   }
 
   def transitiveNpmDevDeps: T[Seq[String]] = Task {
-    Task.traverse(recursiveBunModuleDeps)(_.npmDevDeps)().flatten ++ npmDevDeps()
+    val moduleNpm = Task.traverse(recursiveBunModuleDeps)(_.npmDevDeps)().flatten
+    val moduleBun = Task.traverse(recursiveBunModuleDeps)(_.bunDevDeps)().flatten
+    val jarDevDeps = classpathBunDevDeps()
+    moduleNpm ++ moduleBun ++ jarDevDeps ++ npmDevDeps() ++ bunDevDeps()
   }
 
   def transitiveUnmanagedDeps: T[Seq[PathRef]] = Task {
     Task.traverse(recursiveBunModuleDeps)(_.unmanagedDeps)().flatten ++ unmanagedDeps()
+  }
+
+  /** Optional JS packages — installed if available, not fatal if missing. */
+  def bunOptionalDeps: T[Seq[String]] = Task { Seq.empty }
+
+  // ---------------------------------------------------------------------------
+  // Classpath manifest scanning — reads bun-dependencies.json from dependency JARs
+  // ---------------------------------------------------------------------------
+
+  /** Scan classpath JARs for embedded bun dependency manifests. */
+  def classpathBunDeps: T[Seq[String]] = Task {
+    classpathBunManifests().flatMap(_.dependencies).map { case (name, version) => s"$name@$version" }
+  }
+
+  /** Scan classpath JARs for embedded bun dev-dependency manifests. */
+  def classpathBunDevDeps: T[Seq[String]] = Task {
+    classpathBunManifests().flatMap(_.devDependencies).map { case (name, version) => s"$name@$version" }
+  }
+
+  /** Scan classpath JARs for embedded bun optional-dependency manifests. */
+  def classpathBunOptionalDeps: T[Seq[String]] = Task {
+    classpathBunManifests().flatMap(_.optionalDependencies).map { case (name, version) => s"$name@$version" }
+  }
+
+  private def classpathBunManifests: Task[Seq[BunManifest]] = Task.Anon {
+    runClasspath().flatMap { ref =>
+      val path = ref.path
+      if os.exists(path) && path.ext == "jar" then BunManifest.readFromJar(path).toSeq
+      else if os.isDir(path) then BunManifest.readFromDir(path).toSeq
+      else Nil
+    }
   }
 
   /** Extra package.json fields not modeled by this scaffold. */
@@ -98,8 +156,15 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
     if (name.nonEmpty) name.split('.').last.replace('.', '-') else "app"
   }
 
+  def transitiveBunOptionalDeps: T[Seq[String]] = Task {
+    val moduleOptional = Task.traverse(recursiveBunModuleDeps)(_.bunOptionalDeps)().flatten
+    val jarOptional = classpathBunOptionalDeps()
+    moduleOptional ++ jarOptional ++ bunOptionalDeps()
+  }
+
   private def mkBunPackageJson: Task[Unit] = Task.Anon {
     val dest = Task.dest
+    val allOptional = transitiveBunOptionalDeps().map(BunToolchainModule.splitDep)
     val base = ujson.Obj(
       "name" -> defaultPackageName,
       "private" -> true,
@@ -107,6 +172,8 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
       "dependencies" -> ujson.Obj.from(transitiveNpmDeps().map(BunToolchainModule.splitDep)),
       "devDependencies" -> ujson.Obj.from(transitiveNpmDevDeps().map(BunToolchainModule.splitDep))
     )
+    if allOptional.nonEmpty then
+      base("optionalDependencies") = ujson.Obj.from(allOptional)
 
     val packageType =
       moduleKind() match {
