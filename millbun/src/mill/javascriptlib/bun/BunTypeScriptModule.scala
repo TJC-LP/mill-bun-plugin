@@ -127,7 +127,6 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
 
     PathRef(dest)
   }
-
   /**
    * Preserve Mill's compile sandbox preparation, but invoke TypeScript through
    * Bun instead of a Node-shebang script.
