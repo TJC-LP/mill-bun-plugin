@@ -6,7 +6,7 @@ import java.util.jar.JarFile
   *
   * When a Scala.js library declares direct runtime JS package dependencies via
   * `npmDeps` / `bunDeps`, this manifest is generated and included in the JAR
-  * alongside vendored runtime `node_modules`.
+  * and may optionally be accompanied by vendored runtime `node_modules`.
   *
   * Layout inside JAR:
   * {{{

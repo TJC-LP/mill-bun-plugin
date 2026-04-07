@@ -27,6 +27,19 @@ object BunDependencyManifestIntegrationTests extends TestSuite {
       assert(!res.isSuccess)
     }
 
+    test("published dev-only manifests are still emitted") {
+      val tester = this.tester("scalajs-dependency-manifests")
+      val res = tester.eval("publishedDevOnlyLib.jar")
+      assert(res.isSuccess)
+
+      val jar = outputPath(tester, "publishedDevOnlyLib.jar")
+      val manifest = BunManifest.readFromJar(jar)
+      assert(manifest.isDefined)
+      assert(manifest.get.dependencies.isEmpty)
+      assert(manifest.get.devDependencies == Map("dev-only" -> "^2.0.0"))
+      assert(manifest.get.optionalDependencies.isEmpty)
+    }
+
     test("published manifests include dev-only modules") {
       val tester = this.tester("scalajs-dependency-manifests")
       val res = tester.eval("publishedLib.jar")
@@ -38,6 +51,15 @@ object BunDependencyManifestIntegrationTests extends TestSuite {
       assert(manifest.get.dependencies.isEmpty)
       assert(manifest.get.devDependencies == Map("dev-only" -> "^2.0.0"))
       assert(manifest.get.optionalDependencies == Map("optional-published" -> "^3.0.0"))
+    }
+
+    test("published jars stay manifest-only by default") {
+      val tester = this.tester("scalajs-dependency-manifests")
+      val res = tester.eval("publishedLib.jar")
+      assert(res.isSuccess)
+
+      val jar = outputPath(tester, "publishedLib.jar")
+      assert(!BunVendoredNodeModules.hasVendoredNodeModules(jar))
     }
 
     test("local optional deps flow into generated package.json") {
@@ -57,6 +79,47 @@ object BunDependencyManifestIntegrationTests extends TestSuite {
       val packageJson = ujson.read(os.read(tester.workspacePath / "out" / "appPublished" / "bunInstall.dest" / "package.json"))
       assert(packageJson("devDependencies").obj("dev-only").str == "^2.0.0")
       assert(packageJson("optionalDependencies").obj("optional-published").str == "^3.0.0")
+    }
+
+    test("bunInstall runs when bunPackageJsonExtras adds dependencies") {
+      val tester = this.tester("scalajs-dependency-manifests")
+      val res = tester.eval("appExtrasOnly.bunInstall")
+      assert(res.isSuccess)
+
+      val installDir = tester.workspacePath / "out" / "appExtrasOnly" / "bunInstall.dest"
+      assert(os.exists(installDir / ".stub-bun-ran"))
+      assert(os.exists(installDir / "node_modules" / "extras-only" / "package.json"))
+    }
+
+    test("bunPublishedRuntimeInstall runs for vendored extras-only published deps") {
+      val tester = this.tester("scalajs-dependency-manifests")
+      val res = tester.eval("publishedVendoredExtraLib.bunPublishedRuntimeInstall")
+      assert(res.isSuccess)
+
+      val installDir = tester.workspacePath / "out" / "publishedVendoredExtraLib" / "bunPublishedRuntimeInstall.dest"
+      assert(os.exists(installDir / ".stub-bun-ran"))
+      assert(os.exists(installDir / "node_modules" / "vendored-extra" / "package.json"))
+    }
+
+    test("opted-in published jars embed vendored runtime") {
+      val tester = this.tester("scalajs-dependency-manifests")
+      val res = tester.eval("publishedVendoredExtraLib.jar")
+      assert(res.isSuccess)
+
+      val jar = outputPath(tester, "publishedVendoredExtraLib.jar")
+      val manifest = BunManifest.readFromJar(jar)
+      assert(manifest.isDefined)
+      assert(manifest.get.dependencies == Map("vendored-extra" -> "^4.0.0"))
+      assert(BunVendoredNodeModules.hasVendoredNodeModules(jar))
+    }
+
+    test("consumer bunInstall merges opted-in vendored runtime") {
+      val tester = this.tester("scalajs-dependency-manifests")
+      val res = tester.eval("appVendored.bunInstall")
+      assert(res.isSuccess)
+
+      val installDir = tester.workspacePath / "out" / "appVendored" / "bunInstall.dest"
+      assert(os.exists(installDir / "node_modules" / "vendored-extra" / "package.json"))
     }
   }
 }

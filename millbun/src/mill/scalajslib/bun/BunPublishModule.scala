@@ -9,8 +9,8 @@ import mill.scalajslib.api.ModuleKind
 /** Opt-in trait for Scala.js libraries that publish JARs with embedded bun dependency manifests.
   *
   * Mix this into modules whose JARs should carry `META-INF/bun/bun-dependencies.json`
-  * plus vendored runtime `node_modules` so consumers automatically receive the
-  * exact JS packages required by the published library.
+  * and can optionally embed a vendored runtime `node_modules` tree for
+  * downstream consumers.
   *
   * {{{
   * object myLib extends BunScalaJSModule with BunPublishModule {
@@ -20,15 +20,43 @@ import mill.scalajslib.api.ModuleKind
   */
 trait BunPublishModule extends BunScalaJSModule {
 
+  /** Embed resolved `node_modules` into published artifacts.
+    *
+    * Disabled by default because published JARs are cross-platform, while
+    * Bun installs can materialize host-specific binaries or optional packages.
+    */
+  def bunPublishVendoredRuntime: T[Boolean] = Task { false }
+
+  private def manifestField(extras: ujson.Obj, key: String, fallback: => Map[String, String]): Map[String, String] =
+    extras.value.get(key) match
+      case Some(value) =>
+        try value.obj.map((name, version) => name -> version.str).toMap
+        catch
+          case e: Exception =>
+            throw new RuntimeException(
+              s"BunPublishModule bunPackageJsonExtras.$key must be an object of string versions.",
+              e
+            )
+      case None => fallback
+
+  private def resolvedPublishedManifest: Task[BunManifest] = Task.Anon {
+    val extras = bunPackageJsonExtras()
+    def typed(deps: Seq[String]): Map[String, String] =
+      deps.map(BunToolchainModule.splitDep).map((k, v) => k -> v.str).toMap
+
+    BunManifest(
+      dependencies = manifestField(extras, "dependencies", typed(npmDeps() ++ bunDeps())),
+      devDependencies = manifestField(extras, "devDependencies", typed(npmDevDeps() ++ bunDevDeps())),
+      optionalDependencies = manifestField(extras, "optionalDependencies", typed(bunOptionalDeps()))
+    )
+  }
+
   /** Generate bun dependency manifest for inclusion in published JARs.
     *
     * The manifest describes this library's direct runtime JS requirements.
     */
   def bunDependencyManifest: T[PathRef] = Task {
-    val allDeps = (npmDeps() ++ bunDeps()).map(BunToolchainModule.splitDep).map((k, v) => k -> v.str).toMap
-    val allDevDeps = (npmDevDeps() ++ bunDevDeps()).map(BunToolchainModule.splitDep).map((k, v) => k -> v.str).toMap
-    val optDeps = bunOptionalDeps().map(BunToolchainModule.splitDep).map((k, v) => k -> v.str).toMap
-    val manifest = BunManifest(allDeps, allDevDeps, optDeps)
+    val manifest = resolvedPublishedManifest()
     val metaDir = Task.dest / "META-INF" / "bun"
     os.write(metaDir / "bun-dependencies.json", BunManifest.toJson(manifest).render(indent = 2), createFolders = true)
     PathRef(Task.dest)
@@ -76,7 +104,7 @@ trait BunPublishModule extends BunScalaJSModule {
     PathRef(dest)
   }
 
-  /** Vendored runtime node_modules for deterministic downstream consumption. */
+  /** Vendored runtime node_modules for deterministic downstream consumption when enabled. */
   def bunVendoredRuntimeBundle: T[PathRef] = Task {
     val metaDir = Task.dest / "META-INF" / "bun"
     val runtimeNodeModules = bunPublishedRuntimeInstall().path / "node_modules"
@@ -90,12 +118,23 @@ trait BunPublishModule extends BunScalaJSModule {
 
   /** Resource paths that include the bun dependency manifest.
     *
-    * When this module declares any runtime JS deps, the manifest and vendored
-    * runtime tree are embedded in the published JAR.
+    * The manifest is emitted whenever this module declares publishable Bun
+    * dependency metadata. Vendored runtime trees are emitted only when
+    * `bunPublishVendoredRuntime` is enabled.
     */
   def bunDependencyManifestResources: T[Seq[PathRef]] = Task {
-    val hasManifest = npmDeps().nonEmpty || bunDeps().nonEmpty || bunOptionalDeps().nonEmpty
-    val hasVendoredRuntime = hasManifest || unmanagedDeps().nonEmpty
+    val manifest = resolvedPublishedManifest()
+    val hasManifest =
+      manifest.dependencies.nonEmpty ||
+        manifest.devDependencies.nonEmpty ||
+        manifest.optionalDependencies.nonEmpty
+    val hasVendoredRuntime =
+      bunPublishVendoredRuntime() && (
+        manifest.dependencies.nonEmpty ||
+          manifest.optionalDependencies.nonEmpty ||
+          unmanagedDeps().nonEmpty ||
+          bunPackageJsonExtras().value.nonEmpty
+      )
 
     (if hasManifest then Seq(bunDependencyManifest()) else Seq.empty) ++
       (if hasVendoredRuntime then Seq(bunVendoredRuntimeBundle()) else Seq.empty)

@@ -40,7 +40,7 @@ object app extends BunScalaJSModule {
 
 `BunScalaJSModule` inherits Mill's bundled current Scala.js version, so you configure `scalaVersion` on the module but do not override `scalaJSVersion`. If you keep Scala.js sources at the build root such as `src/`, override `moduleDir = build.moduleDir`; otherwise Mill will look under `<module-name>/src`.
 `BunScalaJSTests` runs the Scala.js test bridge on Bun as the JS runtime. For ESM apps, the test linker falls back to CommonJS so Bun can execute the Scala.js test bridge without the temporary `file:` importer failure that affects `bun run -`.
-For published Scala.js libraries that must carry JS runtime dependencies to downstream consumers, mix in `BunPublishModule`. It embeds `META-INF/bun/bun-dependencies.json` plus a vendored runtime `node_modules` tree in the published artifact so consumer builds do not need to manage those transitive Bun packages separately.
+For published Scala.js libraries that must carry JS runtime dependencies to downstream consumers, mix in `BunPublishModule`. By default it embeds `META-INF/bun/bun-dependencies.json` so consumers keep resolving transitive Bun packages via manifests. If you need to ship a vendored runtime tree as well, set `bunPublishVendoredRuntime = true` and only do so when the resolved closure is platform-independent.
 
 ### TypeScript
 
@@ -132,12 +132,14 @@ Ambient typings are selected from `bunBundleTarget`: `bun` installs pinned `@typ
 ### `BunPublishModule`
 
 Mix into a published `BunScalaJSModule` when downstream consumers should receive its runtime JS closure automatically.
+Published artifacts stay manifest-only by default; opt into vendored `node_modules` only when you know the closure is safe to ship across platforms.
 
 | Task | Default | Description |
 |------|---------|-------------|
+| `bunPublishVendoredRuntime` | `false` | Embed `META-INF/bun/node_modules/**` from a local Bun install |
 | `bunDependencyManifest` | — | Writes `META-INF/bun/bun-dependencies.json` for this module's direct runtime JS deps |
 | `bunPublishedRuntimeInstall` | — | Resolves this module's direct runtime JS closure in an isolated install workspace |
-| `bunVendoredRuntimeBundle` | — | Emits `META-INF/bun/node_modules/**` for deterministic downstream consumption |
+| `bunVendoredRuntimeBundle` | — | Emits `META-INF/bun/node_modules/**` when vendored publishing is enabled |
 
 ## Examples
 
