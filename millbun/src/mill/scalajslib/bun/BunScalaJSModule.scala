@@ -4,7 +4,7 @@ package bun
 import mill.*
 import mill.api.BuildCtx
 import mill.api.JsonFormatters.given
-import mill.bun.{BunManifest, BunToolchainModule}
+import mill.bun.{BunManifest, BunToolchainModule, BunVendoredNodeModules}
 import mill.javalib.JavaModule
 import mill.scalajslib.*
 import mill.scalajslib.api.*
@@ -67,22 +67,23 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
     loop(moduleDepsChecked.toList ++ runModuleDepsChecked.toList, Set.empty, Vector.empty)
   }
 
+  private def recursiveInstallBunModuleDeps: Seq[BunScalaJSModule] =
+    recursiveBunModuleDeps.filterNot(_.isInstanceOf[BunPublishModule])
+
   def transitiveNpmDeps: T[Seq[String]] = Task {
-    val moduleNpm = Task.traverse(recursiveBunModuleDeps)(_.npmDeps)().flatten
-    val moduleBun = Task.traverse(recursiveBunModuleDeps)(_.bunDeps)().flatten
-    val jarDeps = classpathBunDeps()
-    moduleNpm ++ moduleBun ++ jarDeps ++ npmDeps() ++ bunDeps()
+    val moduleNpm = Task.traverse(recursiveInstallBunModuleDeps)(_.npmDeps)().flatten
+    val moduleBun = Task.traverse(recursiveInstallBunModuleDeps)(_.bunDeps)().flatten
+    moduleNpm ++ moduleBun ++ npmDeps() ++ bunDeps()
   }
 
   def transitiveNpmDevDeps: T[Seq[String]] = Task {
-    val moduleNpm = Task.traverse(recursiveBunModuleDeps)(_.npmDevDeps)().flatten
-    val moduleBun = Task.traverse(recursiveBunModuleDeps)(_.bunDevDeps)().flatten
-    val jarDevDeps = classpathBunDevDeps()
-    moduleNpm ++ moduleBun ++ jarDevDeps ++ npmDevDeps() ++ bunDevDeps()
+    val moduleNpm = Task.traverse(recursiveInstallBunModuleDeps)(_.npmDevDeps)().flatten
+    val moduleBun = Task.traverse(recursiveInstallBunModuleDeps)(_.bunDevDeps)().flatten
+    moduleNpm ++ moduleBun ++ npmDevDeps() ++ bunDevDeps()
   }
 
   def transitiveUnmanagedDeps: T[Seq[PathRef]] = Task {
-    Task.traverse(recursiveBunModuleDeps)(_.unmanagedDeps)().flatten ++ unmanagedDeps()
+    Task.traverse(recursiveInstallBunModuleDeps)(_.unmanagedDeps)().flatten ++ unmanagedDeps()
   }
 
   /** Optional JS packages — installed if available, not fatal if missing. */
@@ -157,9 +158,8 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
   }
 
   def transitiveBunOptionalDeps: T[Seq[String]] = Task {
-    val moduleOptional = Task.traverse(recursiveBunModuleDeps)(_.bunOptionalDeps)().flatten
-    val jarOptional = classpathBunOptionalDeps()
-    moduleOptional ++ jarOptional ++ bunOptionalDeps()
+    val moduleOptional = Task.traverse(recursiveInstallBunModuleDeps)(_.bunOptionalDeps)().flatten
+    moduleOptional ++ bunOptionalDeps()
   }
 
   private def mkBunPackageJson: Task[Unit] = Task.Anon {
@@ -187,6 +187,11 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
     os.write.over(dest / "package.json", merged.render(indent = 2), createFolders = true)
   }
 
+  private def mergeVendoredNodeModules(entries: Seq[os.Path], destNodeModules: os.Path): Unit =
+    entries.foreach { entry =>
+      BunVendoredNodeModules.mergeFromClasspathEntry(entry, destNodeModules)
+    }
+
   def bunInstall: T[PathRef] = Task {
     val dest = Task.dest
     os.makeDir.all(dest)
@@ -199,12 +204,23 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
 
     mkBunPackageJson()
 
-    runBun(
-      bunExecutable(),
-      Seq("install") ++ bunInstallArgs() ++ transitiveUnmanagedDeps().map(_.path.toString),
-      cwd = dest,
-      env = bunEnv()
-    )
+    val hasInstallInputs =
+      transitiveNpmDeps().nonEmpty ||
+        transitiveNpmDevDeps().nonEmpty ||
+        transitiveBunOptionalDeps().nonEmpty ||
+        transitiveUnmanagedDeps().nonEmpty
+
+    if hasInstallInputs then
+      runBun(
+        bunExecutable(),
+        Seq("install") ++ bunInstallArgs() ++ transitiveUnmanagedDeps().map(_.path.toString),
+        cwd = dest,
+        env = bunEnv()
+      )
+
+    val ownResourceRoots = resources().map(_.path).toSet
+    val vendoredEntries = runClasspath().map(_.path).filterNot(ownResourceRoots.contains)
+    mergeVendoredNodeModules(vendoredEntries, dest / "node_modules")
 
     PathRef(dest)
   }

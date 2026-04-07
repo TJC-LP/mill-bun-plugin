@@ -40,6 +40,7 @@ object app extends BunScalaJSModule {
 
 `BunScalaJSModule` inherits Mill's bundled current Scala.js version, so you configure `scalaVersion` on the module but do not override `scalaJSVersion`. If you keep Scala.js sources at the build root such as `src/`, override `moduleDir = build.moduleDir`; otherwise Mill will look under `<module-name>/src`.
 `BunScalaJSTests` runs the Scala.js test bridge on Bun as the JS runtime. For ESM apps, the test linker falls back to CommonJS so Bun can execute the Scala.js test bridge without the temporary `file:` importer failure that affects `bun run -`.
+For published Scala.js libraries that must carry JS runtime dependencies to downstream consumers, mix in `BunPublishModule`. It embeds `META-INF/bun/bun-dependencies.json` plus a vendored runtime `node_modules` tree in the published artifact so consumer builds do not need to manage those transitive Bun packages separately.
 
 ### TypeScript
 
@@ -74,7 +75,6 @@ Base trait providing Bun discovery and execution helpers.
 | `bunExecutableName` | `"bun"` | Command name for PATH lookup |
 | `managedBunExecutable` | `None` | Hook for a downloaded/managed Bun binary |
 | `bunEnv` | `Map.empty` | Environment variables for Bun subprocesses |
-| `bunFrozenLockfile` | `false` | Enforce an existing lockfile |
 | `bunLinker` | `"hoisted"` | Bun linker strategy |
 | `bunInstallArgs` | `--save-text-lockfile --linker hoisted` | Default install flags |
 
@@ -128,6 +128,16 @@ When Mill's default `src/<module>.ts` entrypoint is absent, the Bun run/bundle t
 Overrides: `npmInstall` (bun install), `compile` (bun x tsc), `run` (bun run), `bundle` (bun build).
 Bundle outputs preserve the compiled workspace layout, including `resources/`, and `bunCompileResources` keep their relative paths beneath the module directory.
 Ambient typings are selected from `bunBundleTarget`: `bun` installs pinned `@types/bun`, `node` installs pinned `@types/node`, and `browser` installs neither.
+
+### `BunPublishModule`
+
+Mix into a published `BunScalaJSModule` when downstream consumers should receive its runtime JS closure automatically.
+
+| Task | Default | Description |
+|------|---------|-------------|
+| `bunDependencyManifest` | — | Writes `META-INF/bun/bun-dependencies.json` for this module's direct runtime JS deps |
+| `bunPublishedRuntimeInstall` | — | Resolves this module's direct runtime JS closure in an isolated install workspace |
+| `bunVendoredRuntimeBundle` | — | Emits `META-INF/bun/node_modules/**` for deterministic downstream consumption |
 
 ## Examples
 

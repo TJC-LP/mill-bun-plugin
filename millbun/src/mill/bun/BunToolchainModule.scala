@@ -82,15 +82,11 @@ trait BunToolchainModule extends Module {
   /** Lockfile names that Bun may produce. */
   def bunLockfiles: T[Seq[String]] = Task { Seq("bun.lock", "bun.lockb") }
 
-  /** Use Bun's text lockfile by default; optionally enforce an existing lockfile. */
-  def bunFrozenLockfile: T[Boolean] = Task { false }
-
   /** Hoisted installs are the safest default for Node-compatible resolution. */
   def bunLinker: T[String] = Task { "hoisted" }
 
   def bunInstallArgs: T[Seq[String]] = Task {
-    Seq("--save-text-lockfile", "--linker", bunLinker()) ++
-      (if (bunFrozenLockfile()) Seq("--frozen-lockfile") else Nil)
+    Seq("--save-text-lockfile", "--linker", bunLinker())
   }
 
   /**

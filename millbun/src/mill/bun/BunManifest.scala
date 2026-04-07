@@ -4,11 +4,9 @@ import java.util.jar.JarFile
 
 /** Bun dependency manifest embedded in published JARs.
   *
-  * When a Scala.js library declares JS package dependencies via `npmDeps`,
-  * this manifest is generated and included in the JAR at publish time.
-  * Consumer builds scan classpath JARs for these manifests and merge them
-  * into their `package.json`, making JS deps transitive — just like
-  * Coursier resolves JVM deps from POMs.
+  * When a Scala.js library declares direct runtime JS package dependencies via
+  * `npmDeps` / `bunDeps`, this manifest is generated and included in the JAR
+  * alongside vendored runtime `node_modules`.
   *
   * Layout inside JAR:
   * {{{
