@@ -23,6 +23,7 @@ Keeps Mill's task graph, module structure, caching, Scala.js linker integration,
 package build
 
 import mill.*
+import mill.bun.bun
 import mill.scalajslib.*
 import mill.scalajslib.api.*
 import mill.scalajslib.bun.*
@@ -31,7 +32,7 @@ object app extends BunScalaJSModule {
   override def moduleDir = build.moduleDir
   def scalaVersion = "3.8.2"
   override def moduleKind = Task { ModuleKind.ESModule }
-  override def npmDeps = Task { Seq("react@19.1.1") }
+  override def bunDeps = Task { Seq(bun"react@^19.0.0") }
   override def bunBundleTarget = Task { "browser" }
 
   object test extends BunScalaJSTests, TestModule.Utest
@@ -64,6 +65,22 @@ object app extends BunTypeScriptModule {
 }
 ```
 
+## `bun""` String Interpolator
+
+The `bun"pkg@version"` interpolator provides compile-time validation of Bun package specifiers. Import it with `import mill.bun.bun` and use it in `bunDeps` declarations:
+
+```scala
+import mill.bun.bun
+
+override def bunDeps = Task { Seq(
+  bun"react@^19.0.0",
+  bun"@anthropic-ai/claude-agent-sdk@^0.2.90",
+  bun"zod@^4.0.0"
+)}
+```
+
+Invalid or empty specifiers are caught at compile time. The interpolator returns a plain `String`, so it works anywhere `npmDeps` or `bunDeps` accepts strings.
+
 ## Modules
 
 ### `BunToolchainModule`
@@ -77,6 +94,10 @@ Base trait providing Bun discovery and execution helpers.
 | `bunEnv` | `Map.empty` | Environment variables for Bun subprocesses |
 | `bunLinker` | `"hoisted"` | Bun linker strategy |
 | `bunInstallArgs` | `--save-text-lockfile --linker hoisted` | Default install flags |
+| `bunLockfiles` | `Seq("bun.lock", "bun.lockb")` | Lockfile names Bun may produce |
+| `bunfigFiles` | auto-detected | Workspace `bunfig.toml` / `.bunfig.toml` configs |
+| `bunCompileTargets` | `Seq.empty` | Cross-compilation targets (e.g. `"bun-linux-x64"`, `"bun-darwin-arm64"`) |
+| `bunCompileResources` | `Seq.empty` | Extra files/directories for `bun build --compile` workspaces |
 
 ### `BunScalaJSModule`
 
@@ -86,16 +107,28 @@ Extends `ScalaJSModule` with Bun runtime and bundling.
 |------|---------|-------------|
 | `npmDeps` | `Seq.empty` | JS packages for `@JSImport` resolution |
 | `npmDevDeps` | `Seq.empty` | Dev-only JS packages |
-| `transitiveNpmDeps` | — | Includes `npmDeps` from upstream `BunScalaJSModule` dependencies |
-| `transitiveNpmDevDeps` | — | Includes dev deps from upstream `BunScalaJSModule` dependencies |
+| `bunDeps` | `Seq.empty` | JS packages using `bun"pkg@version"` validated syntax |
+| `bunDevDeps` | `Seq.empty` | Dev-only JS packages (independent of `npmDevDeps`) |
+| `bunOptionalDeps` | `Seq.empty` | Optional JS packages — installed if available, not fatal if missing |
+| `unmanagedDeps` | `Seq.empty` | Local tarballs or package directories |
+| `bunPackageJsonExtras` | `ujson.Obj()` | Extra fields merged into generated `package.json` |
+| `transitiveNpmDeps` | — | Merged `npmDeps` + `bunDeps` from this module, upstream deps, and classpath manifests |
+| `transitiveNpmDevDeps` | — | Merged `npmDevDeps` + `bunDevDeps` from this module, upstream deps, and classpath manifests |
+| `classpathBunDeps` | — | Runtime deps auto-populated from dependency JAR manifests |
+| `classpathBunDevDeps` | — | Dev deps auto-populated from dependency JAR manifests |
+| `classpathBunOptionalDeps` | — | Optional deps auto-populated from dependency JAR manifests |
 | `bunBundleTarget` | `"browser"` | `bun build --target` value |
 | `bunBundleFormat` | `None` | Output format (`esm`, `cjs`) |
+| `bunBundleExternal` | `Seq.empty` | Packages treated as external during bundling |
 | `bunBundleSplitting` | `false` | Enable code splitting |
 | `bunBundleBytecode` | `false` | Emit Bun bytecode |
+| `bunBundleArgs` | `Seq.empty` | Extra raw `bun build` flags |
+| `bunBinaryName` | module name | Name for compiled executables |
 | `bunInstall` | — | Runs `bun install` for linked output |
 | `bunBundle` | — | Full Scala.js bundle via `bun build` |
 | `bunBundleFast` | — | Fast bundle from `fastLinkJS` |
 | `bunCompileExecutable` | — | Standalone Bun executable |
+| `bunCompileExecutables` | — | Cross-compile executables per `bunCompileTargets` |
 
 ### `BunWorkersModule`
 
@@ -107,7 +140,17 @@ Mix into a `BunTypeScriptModule` to bundle worker entry points from the staged c
 | `workerSourceRoots` | `Seq(moduleDir)` | Roots used to preserve worker output layout |
 | `workerBundleTarget` | `bunBundleTarget()` | `bun build --target` value for workers |
 | `workerBundleFormat` | `Some(bunBundleFormat())` | Optional worker bundle format |
+| `workerBundleArgs` | `Seq.empty` | Extra raw flags for worker bundling |
 | `bundleWorkers` | — | Bundles all workers under `workers/` while preserving relative paths |
+
+### `BunSQLiteModule`
+
+Mix into a `BunTypeScriptModule` to discover and include SQLite database files in `bun build --compile` workspaces via `bunCompileResources`.
+
+| Task | Default | Description |
+|------|---------|-------------|
+| `sqliteDatabases` | `Seq.empty` | Explicit SQLite database files to include |
+| `sqliteDatabaseDir` | `None` | Directory to scan for `.db`, `.sqlite`, `.sqlite3` files |
 
 ### `BunTypeScriptModule`
 
@@ -122,17 +165,34 @@ When Mill's default `src/<module>.ts` entrypoint is absent, the Bun run/bundle t
 | `bunBundleFormat` | `"esm"` or `"cjs"` | Based on `enableEsm` |
 | `bunCompileExecutable` | `false` | Emit standalone executable |
 | `bunBundlePackagesExternal` | `false` | Treat all packages as external |
+| `bunBundleExternal` | `Seq.empty` | Packages treated as external during bundling |
+| `bunBinaryName` | module name | Name for compiled executables |
+| `bunPackageJsonExtras` | `ujson.Obj()` | Extra fields merged into generated `package.json` |
 | `bunBuildArgs` | `Seq.empty` | Extra raw `bun build` flags |
 | `bunTestArgs` | `Seq.empty` | Extra raw `bun test` flags |
+| `bunCompileExecutables` | — | Cross-compile executables per `bunCompileTargets` |
 
 Overrides: `npmInstall` (bun install), `compile` (bun x tsc), `run` (bun run), `bundle` (bun build).
 Bundle outputs preserve the compiled workspace layout, including `resources/`, and `bunCompileResources` keep their relative paths beneath the module directory.
 Ambient typings are selected from `bunBundleTarget`: `bun` installs pinned `@types/bun`, `node` installs pinned `@types/node`, and `browser` installs neither.
 
+**`BunTypeScriptTests`** inner trait for test modules:
+
+| Task | Default | Description |
+|------|---------|-------------|
+| `bunTestTimeout` | `0` | Test timeout in milliseconds (0 = no timeout) |
+| `bunTestReporter` | `"default"` | Reporter format: `"default"`, `"junit"`, or `"json"` |
+| `bunCoverageReporters` | `Seq("text", "lcov")` | Coverage reporter formats |
+
+Test commands: `test`, `testWatch`, `testUpdateSnapshots`, `coverage`, `coverageReport`.
+
 ### `BunPublishModule`
 
 Mix into a published `BunScalaJSModule` when downstream consumers should receive its runtime JS closure automatically.
-Published artifacts stay manifest-only by default; opt into vendored `node_modules` only when you know the closure is safe to ship across platforms.
+
+Manifests (`META-INF/bun/bun-dependencies.json`) are always published when the module declares any Bun/npm dependencies. Consumer builds scan classpath JARs for these manifests and merge them into their `package.json` via `classpathBunDeps` / `classpathBunDevDeps` / `classpathBunOptionalDeps`.
+
+Optionally, enable `bunPublishVendoredRuntime = true` to also embed a vendored `node_modules` tree in the JAR. This gives consumers the exact resolved packages without running `bun install` for those transitive deps. Only enable this when the resolved closure is platform-independent — Bun installs can materialize host-specific binaries.
 
 | Task | Default | Description |
 |------|---------|-------------|
