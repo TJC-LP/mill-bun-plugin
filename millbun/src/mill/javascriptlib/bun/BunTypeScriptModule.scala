@@ -2,6 +2,7 @@ package mill.javascriptlib
 package bun
 
 import mill.*
+import mill.api.BuildCtx
 import os.*
 import mill.bun.BunToolchainModule
 
@@ -118,6 +119,11 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
     mkBunPackageJson()
     copyBunWorkspaceConfigs()
 
+    // Seed workspace lockfile for deterministic resolution
+    bunWorkspaceLockfile().foreach { lock =>
+      os.copy.over(lock.path, dest / lock.path.last, createFolders = true)
+    }
+
     runBun(
       bunExecutable(),
       Seq("install") ++ bunInstallArgs() ++ transitiveUnmanagedDeps().map(_.path.toString),
@@ -126,6 +132,41 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
     )
 
     PathRef(dest)
+  }
+
+  /** Regenerate the workspace lockfile.
+    *
+    * Runs `bun install` (without `--frozen-lockfile`) in an ephemeral
+    * directory, then copies the resulting lockfile back to the workspace
+    * root so it can be committed for deterministic builds.
+    *
+    * {{{
+    * mill myApp.bunUpdateLock
+    * }}}
+    */
+  def bunUpdateLock(): Command[PathRef] = Task.Command {
+    val dest = Task.dest
+    os.makeDir.all(dest)
+    mkBunPackageJson()
+    copyBunWorkspaceConfigs()
+
+    // Run install WITHOUT --frozen-lockfile to allow fresh resolution
+    val updateArgs = Seq("--save-text-lockfile", "--linker", bunLinker())
+    runBun(
+      bunExecutable(),
+      Seq("install") ++ updateArgs ++ transitiveUnmanagedDeps().map(_.path.toString),
+      cwd = dest,
+      env = bunToolEnv()
+    )
+
+    // Copy generated lockfile back to workspace root
+    val lockName = bunLockfiles().headOption.getOrElse("bun.lock")
+    val generated = dest / lockName
+    if (!os.exists(generated))
+      Task.fail(s"Expected lockfile '$lockName' was not generated in $dest")
+    val target = BuildCtx.workspaceRoot / lockName
+    os.copy.over(generated, target, createFolders = true)
+    PathRef(target)
   }
 
   /**
@@ -326,6 +367,11 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
       os.write.over(dest / "package.json", merged.render(indent = 2), createFolders = true)
 
       outer.copyBunWorkspaceConfigs()
+
+      // Seed workspace lockfile for deterministic resolution
+      outer.bunWorkspaceLockfile().foreach { lock =>
+        os.copy.over(lock.path, dest / lock.path.last, createFolders = true)
+      }
 
       runBun(
         bunExecutable(),

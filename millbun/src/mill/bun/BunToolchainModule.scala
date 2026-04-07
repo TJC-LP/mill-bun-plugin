@@ -109,6 +109,23 @@ trait BunToolchainModule extends Module {
   }
 
   /**
+   * Workspace-level lockfile committed by the developer.
+   *
+   * When present, `bunInstall` / `npmInstall` seed their install directory
+   * with this lockfile so Bun resolves deterministic versions.  In CI,
+   * combine with `bunFrozenLockfile = true` to reject stale lockfiles.
+   *
+   * Declared as `Task.Input` so Mill re-evaluates when the file changes
+   * on disk and the sandbox checker allows reading from the workspace root.
+   */
+  def bunWorkspaceLockfile: T[Option[PathRef]] = Task.Input {
+    Seq("bun.lock", "bun.lockb")
+      .map(name => BuildCtx.workspaceRoot / name)
+      .find(os.exists)
+      .map(PathRef(_))
+  }
+
+  /**
    * Cross-compilation targets for `bun build --compile`.
    * Values: "bun-linux-x64", "bun-darwin-arm64", "bun-windows-x64", etc.
    * Empty means native platform only.

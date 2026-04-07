@@ -197,6 +197,11 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
       os.copy.over(cfg.path, dest / cfg.path.last, createFolders = true)
     }
 
+    // Seed workspace lockfile for deterministic resolution
+    bunWorkspaceLockfile().foreach { lock =>
+      os.copy.over(lock.path, dest / lock.path.last, createFolders = true)
+    }
+
     mkBunPackageJson()
 
     runBun(
@@ -207,6 +212,46 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
     )
 
     PathRef(dest)
+  }
+
+  /** Regenerate the workspace lockfile.
+    *
+    * Runs `bun install` (without `--frozen-lockfile`) in an ephemeral
+    * directory, then copies the resulting lockfile back to the workspace
+    * root so it can be committed for deterministic builds.
+    *
+    * {{{
+    * mill myApp.bunUpdateLock
+    * }}}
+    */
+  def bunUpdateLock(): Command[PathRef] = Task.Command {
+    val dest = Task.dest
+    os.makeDir.all(dest)
+
+    if (os.exists(npmRc().path)) os.copy.over(npmRc().path, dest / ".npmrc", createFolders = true)
+    bunfigFiles().foreach { cfg =>
+      os.copy.over(cfg.path, dest / cfg.path.last, createFolders = true)
+    }
+
+    mkBunPackageJson()
+
+    // Run install WITHOUT --frozen-lockfile to allow fresh resolution
+    val updateArgs = Seq("--save-text-lockfile", "--linker", bunLinker())
+    runBun(
+      bunExecutable(),
+      Seq("install") ++ updateArgs ++ transitiveUnmanagedDeps().map(_.path.toString),
+      cwd = dest,
+      env = bunEnv()
+    )
+
+    // Copy generated lockfile back to workspace root
+    val lockName = bunLockfiles().headOption.getOrElse("bun.lock")
+    val generated = dest / lockName
+    if (!os.exists(generated))
+      Task.fail(s"Expected lockfile '$lockName' was not generated in $dest")
+    val target = BuildCtx.workspaceRoot / lockName
+    os.copy.over(generated, target, createFolders = true)
+    PathRef(target)
   }
 
   private def resolvedBunConfigs: Task[Seq[PathRef]] = Task.Anon {
