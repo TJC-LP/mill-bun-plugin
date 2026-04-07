@@ -123,5 +123,14 @@ object BunVendoredNodeModules:
   private def resolveDest(destRoot: NioPath, rel: NioPath): NioPath =
     if rel.getNameCount == 0 then destRoot else destRoot.resolve(rel)
 
+  /** Check whether a classpath entry contains vendored node_modules. */
+  def hasVendoredNodeModules(entry: os.Path): Boolean =
+    if os.isDir(entry) then os.exists(entry / os.RelPath(BundleRoot))
+    else if os.exists(entry) && entry.ext == "jar" then
+      val jar = new JarFile(entry.toIO)
+      try jar.entries().asScala.exists(_.getName.startsWith(BundleRoot + "/"))
+      finally jar.close()
+    else false
+
   private def shouldSkip(rel: NioPath): Boolean =
     rel.iterator().asScala.exists(_.toString == ".bin")

@@ -26,8 +26,9 @@ trait BunPublishModule extends BunScalaJSModule {
     */
   def bunDependencyManifest: T[PathRef] = Task {
     val allDeps = (npmDeps() ++ bunDeps()).map(BunToolchainModule.splitDep).map((k, v) => k -> v.str).toMap
+    val allDevDeps = (npmDevDeps() ++ bunDevDeps()).map(BunToolchainModule.splitDep).map((k, v) => k -> v.str).toMap
     val optDeps = bunOptionalDeps().map(BunToolchainModule.splitDep).map((k, v) => k -> v.str).toMap
-    val manifest = BunManifest(allDeps, Map.empty, optDeps)
+    val manifest = BunManifest(allDeps, allDevDeps, optDeps)
     val metaDir = Task.dest / "META-INF" / "bun"
     os.write(metaDir / "bun-dependencies.json", BunManifest.toJson(manifest).render(indent = 2), createFolders = true)
     PathRef(Task.dest)
@@ -62,7 +63,8 @@ trait BunPublishModule extends BunScalaJSModule {
     val merged = ujson.Obj.from(base.value.toSeq ++ bunPackageJsonExtras().value.toSeq)
     os.write.over(dest / "package.json", merged.render(indent = 2), createFolders = true)
 
-    val hasRuntimeInputs = deps.nonEmpty || optional.nonEmpty || unmanagedDeps().nonEmpty
+    val hasRuntimeInputs = deps.nonEmpty || optional.nonEmpty || unmanagedDeps().nonEmpty ||
+      bunPackageJsonExtras().value.nonEmpty
     if hasRuntimeInputs then
       runBun(
         bunExecutable(),

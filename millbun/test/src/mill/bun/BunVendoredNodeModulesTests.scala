@@ -65,6 +65,25 @@ object BunVendoredNodeModulesTests extends TestSuite {
       assert(os.read(dest / "node_modules" / "react" / "package.json").contains("19.1.1"))
     }
 
+    test("hasVendoredNodeModules detects vendored tree in directories") {
+      val withVendor = os.temp.dir()
+      writeVendoredPackage(withVendor, "react", "19.1.1")
+      assert(BunVendoredNodeModules.hasVendoredNodeModules(withVendor))
+
+      val withoutVendor = os.temp.dir()
+      assert(!BunVendoredNodeModules.hasVendoredNodeModules(withoutVendor))
+    }
+
+    test("hasVendoredNodeModules detects vendored tree in jars") {
+      val withVendor = tempJar(
+        Map(s"${BunVendoredNodeModules.BundleRoot}/react/package.json" -> """{"name":"react"}""")
+      )
+      assert(BunVendoredNodeModules.hasVendoredNodeModules(withVendor))
+
+      val withoutVendor = tempJar(Map("META-INF/bun/bun-dependencies.json" -> "{}"))
+      assert(!BunVendoredNodeModules.hasVendoredNodeModules(withoutVendor))
+    }
+
     test("conflicting vendored files fail fast") {
       val first = os.temp.dir()
       val second = os.temp.dir()

@@ -73,13 +73,13 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
   def transitiveNpmDeps: T[Seq[String]] = Task {
     val moduleNpm = Task.traverse(recursiveInstallBunModuleDeps)(_.npmDeps)().flatten
     val moduleBun = Task.traverse(recursiveInstallBunModuleDeps)(_.bunDeps)().flatten
-    moduleNpm ++ moduleBun ++ npmDeps() ++ bunDeps()
+    moduleNpm ++ moduleBun ++ classpathBunDeps() ++ npmDeps() ++ bunDeps()
   }
 
   def transitiveNpmDevDeps: T[Seq[String]] = Task {
     val moduleNpm = Task.traverse(recursiveInstallBunModuleDeps)(_.npmDevDeps)().flatten
     val moduleBun = Task.traverse(recursiveInstallBunModuleDeps)(_.bunDevDeps)().flatten
-    moduleNpm ++ moduleBun ++ npmDevDeps() ++ bunDevDeps()
+    moduleNpm ++ moduleBun ++ classpathBunDevDeps() ++ npmDevDeps() ++ bunDevDeps()
   }
 
   def transitiveUnmanagedDeps: T[Seq[PathRef]] = Task {
@@ -108,10 +108,14 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
     classpathBunManifests().flatMap(_.optionalDependencies).map { case (name, version) => s"$name@$version" }
   }
 
+  /** Manifests from classpath entries that do NOT carry vendored node_modules.
+    * Entries with a vendored tree are handled by `mergeVendoredNodeModules` instead.
+    */
   private def classpathBunManifests: Task[Seq[BunManifest]] = Task.Anon {
     runClasspath().flatMap { ref =>
       val path = ref.path
-      if os.exists(path) && path.ext == "jar" then BunManifest.readFromJar(path).toSeq
+      if BunVendoredNodeModules.hasVendoredNodeModules(path) then Nil
+      else if os.exists(path) && path.ext == "jar" then BunManifest.readFromJar(path).toSeq
       else if os.isDir(path) then BunManifest.readFromDir(path).toSeq
       else Nil
     }
@@ -159,7 +163,7 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
 
   def transitiveBunOptionalDeps: T[Seq[String]] = Task {
     val moduleOptional = Task.traverse(recursiveInstallBunModuleDeps)(_.bunOptionalDeps)().flatten
-    moduleOptional ++ bunOptionalDeps()
+    moduleOptional ++ classpathBunOptionalDeps() ++ bunOptionalDeps()
   }
 
   private def mkBunPackageJson: Task[Unit] = Task.Anon {
@@ -208,7 +212,8 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
       transitiveNpmDeps().nonEmpty ||
         transitiveNpmDevDeps().nonEmpty ||
         transitiveBunOptionalDeps().nonEmpty ||
-        transitiveUnmanagedDeps().nonEmpty
+        transitiveUnmanagedDeps().nonEmpty ||
+        bunPackageJsonExtras().value.nonEmpty
 
     if hasInstallInputs then
       runBun(
