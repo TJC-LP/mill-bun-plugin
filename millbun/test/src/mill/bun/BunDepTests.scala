@@ -50,10 +50,7 @@ object BunDepTests extends TestSuite {
       assert(deps.head.startsWith("@anthropic-ai"))
     }
 
-    // Note: compile-time validation errors can't be tested at runtime.
-    // The following would fail to compile:
-    //   bun""                    // empty
-    //   bun"@/bad"               // empty name after scope
-    //   bun"@noSlash"            // missing slash in scoped name
+    // Invalid literal coverage lives in integration tests so the interpolator
+    // is compiled in a normal build.mill context rather than inside another macro.
   }
 }
