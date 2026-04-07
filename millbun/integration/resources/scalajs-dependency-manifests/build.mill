@@ -1,0 +1,51 @@
+//| mill-version: 1.1.5
+//| mill-jvm-version: system
+//| mvnDeps:
+//| - com.tjclp::mill-bun_mill1:0.0.0-NIGHTLY
+
+package build
+
+import mill.*
+import mill.api.PathRef
+import mill.scalajslib.*
+import mill.scalajslib.api.*
+import mill.scalajslib.bun.*
+
+trait StubBunModule extends BunScalaJSModule {
+  override def moduleDir = build.moduleDir
+  def scalaVersion = "3.8.2"
+  override def moduleKind = Task { ModuleKind.CommonJSModule }
+  override def bunExecutable = Task { "stub-bun" }
+
+  override protected def runBun(
+      bunExe: String,
+      args: Seq[String],
+      cwd: os.Path,
+      env: Map[String, String]
+  ): os.CommandResult = {
+    os.call(Seq("true"), cwd = cwd, env = env)
+  }
+}
+
+object localLib extends StubBunModule {
+  override def sources = Task.Sources(moduleDir / "local-lib")
+  override def bunOptionalDeps = Task { Seq("optional-local@^1.0.0") }
+}
+
+object publishedLib extends StubBunModule with BunPublishModule {
+  override def sources = Task.Sources(moduleDir / "published-lib")
+  override def bunDevDeps = Task { Seq("dev-only@^2.0.0") }
+  override def bunOptionalDeps = Task { Seq("optional-published@^3.0.0") }
+}
+
+object appLocal extends StubBunModule {
+  override def sources = Task.Sources(moduleDir / "app-local")
+  override def moduleDeps = Seq(localLib)
+}
+
+object appPublished extends StubBunModule {
+  override def sources = Task.Sources(moduleDir / "app-published")
+  override def runClasspath: T[Seq[PathRef]] = Task {
+    super.runClasspath() ++ Seq(publishedLib.jar())
+  }
+}
