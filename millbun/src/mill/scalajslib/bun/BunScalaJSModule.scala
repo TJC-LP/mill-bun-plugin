@@ -450,6 +450,44 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
       }
     }
 
+    /**
+     * Runtime environment for the JS process that drives the Scala.js test
+     * framework. Defaults to the outer module's [[bunJsEnv]] unchanged, so
+     * plain test runs behave exactly like before.
+     *
+     * Override this when your tests need environment variables that differ
+     * from production `bunRun` invocations. A common case: set
+     * `NODE_ENV=production` so that in-process [[https://bun.sh/docs/api/http
+     * `Bun.serve({...})`]] calls default `development: false`. Otherwise
+     * Bun's dev-mode error overlay rewrites any fetch-handler Promise
+     * rejection into a ~100 KB HTML `Response` (the `BunError` React
+     * bundle), which masks the real error inside a running test and makes
+     * HTTP-level assertions impossible. Example:
+     *
+     * {{{
+     *   object test extends BunScalaJSTests:
+     *     override def bunTestJsEnv = Task {
+     *       super.bunTestJsEnv() + ("NODE_ENV" -> "production")
+     *     }
+     * }}}
+     */
+    def bunTestJsEnv: T[Map[String, String]] = Task { outer.bunJsEnv() }
+
+    /**
+     * Scala.js environment used specifically for the test framework process.
+     * Mirrors [[outer.jsEnvConfig]] but sources its `env` from
+     * [[bunTestJsEnv]] so tests can diverge (e.g. override `NODE_ENV`)
+     * without affecting `bunRun` on the outer module.
+     */
+    override def jsEnvConfig: T[JsEnvConfig] = Task {
+      JsEnvConfig.NodeJs(
+        executable = outer.bunExecutable(),
+        args = outer.bunJsEnvArgs().toList,
+        env = bunTestJsEnv(),
+        sourceMap = outer.scalaJSSourceMap()
+      )
+    }
+
     override protected def testLinkTask: Task[Report] = Task.Anon {
       val linkConfig =
         outer.moduleKind() match {
