@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tag-driven release workflow for Maven Central publishing and GitHub releases.
 - Release runbook covering secrets, version sweep, annotated tags, and verification.
 
-## [0.2.1] - Overridable test-time JS env
+## [0.2.1] - Overridable test-time JS env (2026-04-17)
 
 ### Added
 
