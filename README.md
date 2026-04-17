@@ -18,7 +18,7 @@ Keeps Mill's task graph, module structure, caching, Scala.js linker integration,
 //| mill-version: 1.1.5
 //| mill-jvm-version: system
 //| mvnDeps:
-//| - com.tjclp::mill-bun_mill1:0.2.0
+//| - com.tjclp::mill-bun_mill1:0.2.1
 
 package build
 
@@ -49,7 +49,7 @@ For published Scala.js libraries that must carry JS runtime dependencies to down
 //| mill-version: 1.1.5
 //| mill-jvm-version: system
 //| mvnDeps:
-//| - com.tjclp::mill-bun_mill1:0.2.0
+//| - com.tjclp::mill-bun_mill1:0.2.1
 
 package build
 
