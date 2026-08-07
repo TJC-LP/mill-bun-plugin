@@ -27,27 +27,16 @@ trait BunPublishModule extends BunScalaJSModule {
     */
   def bunPublishVendoredRuntime: T[Boolean] = Task { false }
 
-  private def manifestField(extras: ujson.Obj, key: String, fallback: => Map[String, String]): Map[String, String] =
-    extras.value.get(key) match
-      case Some(value) =>
-        try value.obj.map((name, version) => name -> version.str).toMap
-        catch
-          case e: Exception =>
-            throw new RuntimeException(
-              s"BunPublishModule bunPackageJsonExtras.$key must be an object of string versions.",
-              e
-            )
-      case None => fallback
-
   private def resolvedPublishedManifest: Task[BunManifest] = Task.Anon {
-    val extras = bunPackageJsonExtras()
     def typed(deps: Seq[String]): Map[String, String] =
-      deps.map(BunToolchainModule.splitDep).map((k, v) => k -> v.str).toMap
+      BunToolchainModule.dependencyPairs(deps, npmOverrides()).map((k, v) => k -> v.str).toMap
 
     BunManifest(
-      dependencies = manifestField(extras, "dependencies", typed(npmDeps() ++ bunDeps())),
-      devDependencies = manifestField(extras, "devDependencies", typed(npmDevDeps() ++ bunDevDeps())),
-      optionalDependencies = manifestField(extras, "optionalDependencies", typed(bunOptionalDeps()))
+      dependencies = typed(npmDeps() ++ bunDeps()),
+      devDependencies = Map.empty,
+      optionalDependencies = typed(npmOptionalDeps() ++ bunOptionalDeps()),
+      peerDependencies = typed(npmPeerDeps()),
+      schemaVersion = 2
     )
   }
 
@@ -73,8 +62,8 @@ trait BunPublishModule extends BunScalaJSModule {
       os.copy.over(cfg.path, dest / cfg.path.last, createFolders = true)
     }
 
-    val deps = (npmDeps() ++ bunDeps()).map(BunToolchainModule.splitDep)
-    val optional = bunOptionalDeps().map(BunToolchainModule.splitDep)
+    val deps = BunToolchainModule.dependencyPairs(npmDeps() ++ bunDeps(), npmOverrides())
+    val optional = BunToolchainModule.dependencyPairs(npmOptionalDeps() ++ bunOptionalDeps(), npmOverrides())
     val base = ujson.Obj(
       "name" -> defaultPackageName,
       "private" -> true,
@@ -88,15 +77,22 @@ trait BunPublishModule extends BunScalaJSModule {
       case ModuleKind.ESModule => base("type") = "module"
       case _                   => ()
 
-    val merged = ujson.Obj.from(base.value.toSeq ++ bunPackageJsonExtras().value.toSeq)
+    val merged = BunToolchainModule.mergePackageJson(base, bunPackageJsonExtras())
     os.write.over(dest / "package.json", merged.render(indent = 2), createFolders = true)
 
-    val hasRuntimeInputs = deps.nonEmpty || optional.nonEmpty || unmanagedDeps().nonEmpty ||
-      bunPackageJsonExtras().value.nonEmpty
+    val hasRuntimeInputs = deps.nonEmpty || optional.nonEmpty || unmanagedDeps().nonEmpty
+    val lockfile = bunLockfile()
+    requireBunLockfile(hasRuntimeInputs, lockfile, bunRequireLockfile())
+    copyBunLockfile(lockfile, dest)
     if hasRuntimeInputs then
       runBun(
         bunExecutable(),
-        Seq("install") ++ bunInstallArgs() ++ unmanagedDeps().map(_.path.toString),
+        Seq("install") ++ resolvedBunInstallArgs(
+          bunInstallArgs(),
+          bunInstallExtraArgs(),
+          lockfile.nonEmpty,
+          updateLockfile = false
+        ) ++ unmanagedDeps().map(_.path.toString),
         cwd = dest,
         env = bunEnv()
       )
@@ -126,14 +122,13 @@ trait BunPublishModule extends BunScalaJSModule {
     val manifest = resolvedPublishedManifest()
     val hasManifest =
       manifest.dependencies.nonEmpty ||
-        manifest.devDependencies.nonEmpty ||
-        manifest.optionalDependencies.nonEmpty
+        manifest.optionalDependencies.nonEmpty ||
+        manifest.peerDependencies.nonEmpty
     val hasVendoredRuntime =
       bunPublishVendoredRuntime() && (
         manifest.dependencies.nonEmpty ||
           manifest.optionalDependencies.nonEmpty ||
-          unmanagedDeps().nonEmpty ||
-          bunPackageJsonExtras().value.nonEmpty
+          unmanagedDeps().nonEmpty
       )
 
     (if hasManifest then Seq(bunDependencyManifest()) else Seq.empty) ++

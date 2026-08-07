@@ -3,9 +3,20 @@ package bun
 
 import mill.*
 import os.*
-import mill.bun.BunToolchainModule
+import mill.bun.{BunPackageModule, BunToolchainModule}
 
-trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { outer =>
+trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with BunPackageModule { outer =>
+
+  /** Optional packages installed when available. */
+  def npmOptionalDeps: T[Seq[String]] = Task { Seq.empty }
+
+  /** Peer requirements supplied by consuming packages. */
+  def npmPeerDeps: T[Seq[String]] = Task { Seq.empty }
+
+  /** Development dependencies are local tooling inputs, not transitive runtime requirements. */
+  override def transitiveNpmDevDeps: T[Seq[String]] = Task { npmDevDeps() }
+
+  override def bunWorkspaceUnmanagedDeps: T[Seq[PathRef]] = transitiveUnmanagedDeps
 
   /** Extra flags passed to `bun run`. */
   def bunRunArgs: T[Seq[String]] = Task { Seq.empty }
@@ -17,6 +28,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
   def bunBundleFormat: T[String] = Task { if (enableEsm()) "esm" else "cjs" }
 
   /** Emit a standalone executable instead of a JS bundle. */
+  @deprecated("Use the compileExecutable task", "0.3.0")
   def bunCompileExecutable: T[Boolean] = Task { false }
 
   /** Treat all packages as external during bundling. */
@@ -66,22 +78,38 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
     Seq(s"typescript@${typeScriptVersion()}") ++ ambientTypeDeps()
   }
 
-  private def mkBunPackageJson: Task[Unit] = Task.Anon {
-    val dest = Task.dest
+  override def bunWorkspacePackageName: T[String] = Task { moduleName }
+
+  override def bunWorkspacePackageJson: T[ujson.Obj] = Task {
     val user = packageJson()
+    val overrides = npmOverrides()
 
     val resolved = ujson.Obj.from(
       user.copy(
         name = if (user.name.nonEmpty) user.name else moduleName,
         version = if (user.version.nonEmpty) user.version else "1.0.0",
         `type` = if (enableEsm()) "module" else user.`type`,
-        dependencies = ujson.Obj.from(transitiveNpmDeps().map(BunToolchainModule.splitDep)),
-        devDependencies = ujson.Obj.from((transitiveNpmDevDeps() ++ tsDeps()).map(BunToolchainModule.splitDep))
+        dependencies = ujson.Obj.from(BunToolchainModule.dependencyPairs(transitiveNpmDeps(), overrides)),
+        devDependencies = ujson.Obj.from(BunToolchainModule.dependencyPairs(transitiveNpmDevDeps() ++ tsDeps(), overrides))
       ).cleanJson.obj.toSeq
     )
 
-    val merged = ujson.Obj.from(resolved.value.toSeq ++ bunPackageJsonExtras().value.toSeq)
-    os.write.over(dest / "package.json", merged.render(indent = 2), createFolders = true)
+    val optional = BunToolchainModule.dependencyPairs(npmOptionalDeps(), overrides)
+    val peers = BunToolchainModule.dependencyPairs(npmPeerDeps(), overrides)
+    if optional.nonEmpty then resolved("optionalDependencies") = ujson.Obj.from(optional)
+    if peers.nonEmpty then resolved("peerDependencies") = ujson.Obj.from(peers)
+    if overrides.nonEmpty then
+      resolved("overrides") = ujson.Obj.from(overrides.toSeq.sortBy(_._1).map((name, value) => name -> ujson.Str(value)))
+
+    BunToolchainModule.mergePackageJson(resolved, bunPackageJsonExtras())
+  }
+
+  private def mkBunPackageJson: Task[Unit] = Task.Anon {
+    os.write.over(
+      Task.dest / "package.json",
+      bunWorkspacePackageJson().render(indent = 2),
+      createFolders = true
+    )
   }
 
   private def resolvedBunfigs: Task[Seq[PathRef]] = Task.Anon {
@@ -118,14 +146,62 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
     mkBunPackageJson()
     copyBunWorkspaceConfigs()
 
+    bunWorkspaceInstall() match
+      case Some(workspaceInstall) =>
+        val installed = workspaceInstall.path
+        if os.exists(installed / "node_modules") then
+          os.symlink(dest / "node_modules", installed / "node_modules")
+        bunLockfiles().foreach { name =>
+          val source = installed / name
+          if os.exists(source) then os.symlink(dest / name, source)
+        }
+      case None =>
+        val lockfile = bunLockfile()
+        requireBunLockfile(true, lockfile, bunRequireLockfile())
+        copyBunLockfile(lockfile, dest)
+
+        runBun(
+          bunExecutable(),
+          Seq("install") ++ resolvedBunInstallArgs(
+            bunInstallArgs(),
+            bunInstallExtraArgs(),
+            lockfile.nonEmpty,
+            updateLockfile = false
+          ) ++ transitiveUnmanagedDeps().map(_.path.toString),
+          cwd = dest,
+          env = bunToolEnv()
+        )
+
+    PathRef(dest)
+  }
+
+  /** Resolve dependencies and update the source-controlled `bun.lock`. */
+  def bunLock(): Command[PathRef] = Task.Command {
+    if bunWorkspaceInstall().nonEmpty then
+      Task.fail("This package uses a Bun workspace. Run the workspace module's bunLock command.")
+    val dest = Task.dest
+    os.makeDir.all(dest)
+    mkBunPackageJson()
+    copyBunWorkspaceConfigs()
+    copyBunLockfile(bunLockfile(), dest)
+
     runBun(
       bunExecutable(),
-      Seq("install") ++ bunInstallArgs() ++ transitiveUnmanagedDeps().map(_.path.toString),
+      Seq("install") ++ resolvedBunInstallArgs(
+        bunInstallArgs(),
+        bunInstallExtraArgs(),
+        bunLockfile().nonEmpty,
+        updateLockfile = true
+      ) ++ transitiveUnmanagedDeps().map(_.path.toString),
       cwd = dest,
       env = bunToolEnv()
     )
 
-    PathRef(dest)
+    val generated = dest / "bun.lock"
+    if (!os.exists(generated)) Task.fail("Bun did not generate bun.lock")
+    val sourceLock = moduleDir / "bun.lock"
+    os.copy.over(generated, sourceLock, createFolders = true)
+    PathRef(sourceLock)
   }
   /**
    * Preserve Mill's compile sandbox preparation, but invoke TypeScript through
@@ -232,12 +308,44 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
     PathRef(outFile)
   }
 
+  /** Build the configured entrypoint as a standalone Bun executable. */
+  def compileExecutable: T[PathRef] = Task {
+    val compileDir = compile().path
+    val buildDir = Task.dest / "workspace"
+    val mainFile = resolvedEntrypoint(mainFilePath(), compileDir).relativeTo(compileDir).toString
+    val outFile = Task.dest / bunBinaryName()
+
+    BunToolchainModule.copyWorkspace(compileDir, buildDir)
+    BunTypeScriptModule.removeInstallOnlyConfigs(buildDir)
+    BunTypeScriptModule.copyBunfigsTo(buildDir, resolvedBunfigs())
+    copyCompileResources(bunCompileResources(), buildDir)
+
+    val packagesExternal = if (bunBundlePackagesExternal()) Seq("--packages", "external") else Nil
+    val externalArgs = bunBundleExternal().flatMap(dep => Seq("--external", dep))
+    runBun(
+      bunExecutable(),
+      Seq(
+        "build",
+        mainFile,
+        "--compile",
+        "--target",
+        "bun",
+        "--outfile",
+        outFile.toString
+      ) ++ packagesExternal ++ externalArgs ++ bunBuildArgs(),
+      cwd = buildDir,
+      env = bunToolEnv()
+    )
+
+    PathRef(outFile)
+  }
+
   /**
    * Cross-compile standalone executables for each configured target.
    * Returns a map of target name to executable PathRef.
    * Requires `bunCompileTargets` to be non-empty.
    */
-  def bunCompileExecutables: T[Map[String, PathRef]] = Task {
+  def compileExecutables: T[Map[String, PathRef]] = Task {
     val targets = bunCompileTargets()
     if (targets.isEmpty) Task.fail("bunCompileTargets is empty. Set targets like Seq(\"bun-linux-x64\", \"bun-darwin-arm64\").")
 
@@ -276,6 +384,10 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
     }.toMap
   }
 
+  /** Compatibility alias for the canonical cross-platform executable task. */
+  @deprecated("Use compileExecutables", "0.3.0")
+  def bunCompileExecutables: T[Map[String, PathRef]] = Task { compileExecutables() }
+
   /**
    * Bun-native nested test module.
    *
@@ -302,13 +414,14 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
       // test module's transitive deps; we achieve the same by building one
       // merged package.json before `bun install`.
       val user = outer.packageJson()
-      val outerDeps = outer.transitiveNpmDeps().map(BunToolchainModule.splitDep)
-      val outerDevDeps = (outer.transitiveNpmDevDeps() ++ outer.tsDeps()).map(BunToolchainModule.splitDep)
+      val overrides = outer.npmOverrides()
+      val outerDeps = BunToolchainModule.dependencyPairs(outer.transitiveNpmDeps(), overrides)
+      val outerDevDeps = BunToolchainModule.dependencyPairs(outer.transitiveNpmDevDeps() ++ outer.tsDeps(), overrides)
       val outerPackageNames = (outerDeps.iterator ++ outerDevDeps.iterator).map(_._1).toSet
       // Test-only deps are dev dependencies — they should not appear in the
       // production dependencies field, matching Bun/npm convention.
-      val testDevDeps = (transitiveNpmDeps() ++ transitiveNpmDevDeps() ++ this.tsDeps())
-        .map(BunToolchainModule.splitDep)
+      val testDevDeps = BunToolchainModule
+        .dependencyPairs(transitiveNpmDeps() ++ this.npmDevDeps() ++ this.tsDeps(), overrides)
         .filterNot { case (name, _) => outerPackageNames.contains(name) }
 
       val resolved = ujson.Obj.from(
@@ -321,14 +434,32 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule { out
         ).cleanJson.obj.toSeq
       )
 
-      val merged = ujson.Obj.from(resolved.value.toSeq ++ outer.bunPackageJsonExtras().value.toSeq)
+      val optional = BunToolchainModule.dependencyPairs(outer.npmOptionalDeps(), overrides)
+      val peers = BunToolchainModule.dependencyPairs(outer.npmPeerDeps(), overrides)
+      if optional.nonEmpty then resolved("optionalDependencies") = ujson.Obj.from(optional)
+      if peers.nonEmpty then resolved("peerDependencies") = ujson.Obj.from(peers)
+      if overrides.nonEmpty then
+        resolved("overrides") = ujson.Obj.from(
+          overrides.toSeq.sortBy(_._1).map((name, value) => name -> ujson.Str(value))
+        )
+
+      val merged = BunToolchainModule.mergePackageJson(resolved, outer.bunPackageJsonExtras())
       os.write.over(dest / "package.json", merged.render(indent = 2), createFolders = true)
 
       outer.copyBunWorkspaceConfigs()
 
+      val lockfile = bunLockfile()
+      requireBunLockfile(true, lockfile, bunRequireLockfile())
+      copyBunLockfile(lockfile, dest)
+
       runBun(
         bunExecutable(),
-        Seq("install") ++ bunInstallArgs() ++ (outer.transitiveUnmanagedDeps() ++ transitiveUnmanagedDeps()).distinct.map(_.path.toString),
+        Seq("install") ++ resolvedBunInstallArgs(
+          bunInstallArgs(),
+          bunInstallExtraArgs(),
+          lockfile.nonEmpty,
+          updateLockfile = false
+        ) ++ (outer.transitiveUnmanagedDeps() ++ transitiveUnmanagedDeps()).distinct.map(_.path.toString),
         cwd = dest,
         env = outer.bunToolEnv()
       )

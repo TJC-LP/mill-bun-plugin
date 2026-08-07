@@ -50,6 +50,18 @@ object BunTypeScriptIntegrationTests extends TestSuite {
       assert(run.out.text().trim == "Hello from bundled TypeScript resources!")
     }
 
+    test("web bundle includes HTML CSS and JavaScript") {
+      val tester = this.tester("typescript-web")
+      val res = tester.eval("app.bundle")
+      assert(res.isSuccess)
+
+      val dist = outputPath(tester, "app.bundle")
+      val files = os.walk(dist).filter(os.isFile)
+      assert(files.exists(_.ext == "html"))
+      assert(files.exists(_.ext == "css"))
+      assert(files.exists(_.ext == "js"))
+    }
+
     test("run") {
       val tester = this.tester("typescript-simple")
       val res = tester.eval("app.run")
@@ -61,15 +73,30 @@ object BunTypeScriptIntegrationTests extends TestSuite {
 
     test("compile-executable") {
       val tester = this.tester("typescript-compile")
-      val res = tester.eval("app.bundle")
+      val res = tester.eval("app.compileExecutable")
       assert(res.isSuccess)
 
-      val executable = outputPath(tester, "app.bundle")
+      val executable = outputPath(tester, "app.compileExecutable")
       val run = os.call(
         Seq(executable.toString),
         cwd = executable / os.up
       )
       assert(run.out.text().trim == "Hello from compiled TypeScript executable!")
+    }
+
+    test("strict installs require a source lock and bunLock creates it") {
+      val tester = this.tester("typescript-lock")
+      val missingLock = tester.eval("app.npmInstall")
+      assert(!missingLock.isSuccess)
+
+      val lockResult = tester.eval("app.bunLock")
+      assert(lockResult.isSuccess)
+      assert(os.exists(tester.workspacePath / "bun.lock"))
+
+      val installResult = tester.eval("app.npmInstall")
+      assert(installResult.isSuccess)
+      val args = os.read(tester.workspacePath / "out" / "app" / "npmInstall.dest" / ".bun-args")
+      assert(args.contains("--frozen-lockfile"))
     }
 
     test("bun target ambient types are pinned") {

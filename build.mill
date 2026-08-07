@@ -8,15 +8,12 @@ object millbun extends ScalaModule, PublishModule {
   def scalaVersion = "3.8.2"
   def jvmVersion = "25"
   def platformSuffix = "_mill1"
-  def bundledScalaJSVersion = "1.20.2"
 
   def artifactName = "mill-bun"
 
   def mvnDeps = Seq(
-    mvn"com.lihaoyi::mill-libs:$millVersion",
-    mvn"com.lihaoyi::mill-libs-scalajslib-config-1:$millVersion",
-    mvn"org.scala-js:scalajs-linker_2.13:$bundledScalaJSVersion",
-    mvn"org.scala-js:scalajs-js-envs_2.13:1.4.0"
+    // mill-libs is Scala-cross-published but intentionally not Mill-platform-cross-published.
+    mvn"com.lihaoyi::mill-libs:$millVersion"
   )
 
   object test extends ScalaTests, TestModule.Utest {
@@ -39,7 +36,11 @@ object millbun extends ScalaModule, PublishModule {
         Seq(Task.env.getOrElse("COURSIER_REPOSITORIES", "ivy2Local|central"))
       Map(
         "MILL_EXECUTABLE_PATH" -> millScript.toString,
-        "COURSIER_REPOSITORIES" -> repos.mkString("|")
+        "COURSIER_REPOSITORIES" -> repos.mkString("|"),
+        // Existing fixtures exercise installed Bun behavior. Dedicated tests cover
+        // managed resolution and strict lockfile failures.
+        "MILL_BUN_USE_SYSTEM" -> Task.env.getOrElse("MILL_BUN_USE_SYSTEM", "true"),
+        "MILL_BUN_REQUIRE_LOCKFILE" -> Task.env.getOrElse("MILL_BUN_REQUIRE_LOCKFILE", "false")
       )
     }
 

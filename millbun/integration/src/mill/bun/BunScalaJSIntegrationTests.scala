@@ -61,31 +61,43 @@ object BunScalaJSIntegrationTests extends TestSuite {
       assert(res.isSuccess)
     }
 
-    test("bunBundle") {
+    test("bundle") {
       val tester = this.tester("scalajs-bundle")
-      val res = tester.eval("app.bunBundle")
+      val res = tester.eval("app.bundle")
       assert(res.isSuccess)
 
-      val dist = outputPath(tester, "app.bunBundle")
+      val dist = outputPath(tester, "app.bundle")
       val mainJs = bundledScript(dist)
       assert(runBundledScript(mainJs) == "Hello from scala.js with lodash on bun")
     }
 
-    test("bunCompileExecutable") {
-      val tester = this.tester("scalajs-bundle")
-      val res = tester.eval("app.bunCompileExecutable")
+    test("web bundle includes HTML CSS and JavaScript") {
+      val tester = this.tester("scalajs-web")
+      val res = tester.eval("app.bundle")
       assert(res.isSuccess)
 
-      val executable = outputPath(tester, "app.bunCompileExecutable")
+      val dist = outputPath(tester, "app.bundle")
+      val files = os.walk(dist).filter(os.isFile)
+      assert(files.exists(_.ext == "html"))
+      assert(files.exists(_.ext == "css"))
+      assert(files.exists(_.ext == "js"))
+    }
+
+    test("compileExecutable") {
+      val tester = this.tester("scalajs-bundle")
+      val res = tester.eval("app.compileExecutable")
+      assert(res.isSuccess)
+
+      val executable = outputPath(tester, "app.compileExecutable")
       assert(runExecutable(executable) == "Hello from scala.js with lodash on bun")
     }
 
     test("transitive npm deps") {
       val tester = this.tester("scalajs-transitive")
-      val res = tester.eval("app.bunBundle")
+      val res = tester.eval("app.bundle")
       assert(res.isSuccess)
 
-      val dist = outputPath(tester, "app.bunBundle")
+      val dist = outputPath(tester, "app.bundle")
       val mainJs = bundledScript(dist)
       assert(runBundledScript(mainJs) == "Hello from transitive scala.js bun")
     }
@@ -111,9 +123,9 @@ object BunScalaJSIntegrationTests extends TestSuite {
       assert(os.exists(linkedDir / "bunfig.toml"))
       assert(!os.exists(linkedDir / ".npmrc"))
 
-      val compileRes = tester.eval("app.bunCompileExecutable")
+      val compileRes = tester.eval("app.compileExecutable")
       assert(compileRes.isSuccess)
-      val compileWorkspace = tester.workspacePath / "out" / "app" / "bunCompileExecutable.dest" / "workspace"
+      val compileWorkspace = tester.workspacePath / "out" / "app" / "compileExecutable.dest" / "workspace"
       assert(os.exists(compileWorkspace / "bunfig.toml"))
       assert(!os.exists(compileWorkspace / ".npmrc"))
 

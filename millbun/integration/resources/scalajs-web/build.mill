@@ -11,17 +11,11 @@ import mill.scalajslib.*
 import mill.scalajslib.api.*
 import mill.scalajslib.bun.*
 
-object app extends BunScalaJSModule {
+object app extends BunScalaJSWebModule {
   override def moduleDir = build.moduleDir
   def scalaVersion = "3.8.2"
   def scalaJSVersion = "1.22.0"
-
+  def mvnDeps = Seq(mvn"org.scala-js::scalajs-dom::2.8.1")
+  override def mainClass = Some("Main")
   override def moduleKind = Task { ModuleKind.ESModule }
-
-  object test extends BunScalaJSTests, TestModule.Utest {
-    def mvnDeps = Seq(
-      mvn"com.lihaoyi::utest::0.8.5"
-    )
-    def testFramework = "utest.runner.Framework"
-  }
 }

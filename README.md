@@ -1,55 +1,62 @@
 # mill-bun-plugin
 
-A [Mill](https://mill-build.org) plugin that adds [Bun](https://bun.sh)-backed workflows for Scala.js and TypeScript projects.
+A [Mill](https://mill-build.org) plugin for first-class [Bun](https://bun.sh) workflows in Scala.js and TypeScript projects.
 
-Keeps Mill's task graph, module structure, caching, Scala.js linker integration, and generated `tsconfig` handling — while swapping the JS runtime/package/bundling backend from `node`/`npm`/`esbuild` to Bun.
+It keeps Mill's task graph, caching, module relationships, Scala.js linker, and TypeScript configuration while using Bun for dependency installation, execution, tests, bundling, web development, and native executables.
 
 ## Requirements
 
 - Mill 1.1.5+
-- Bun 1.2+ on PATH
 - JDK 17+
 
-## Quick Start
+Bun does not need to be installed. The plugin downloads and verifies Bun 1.3.14 by default on supported macOS, Linux, and Windows x64/arm64 hosts. Set `MILL_BUN_USE_SYSTEM=true` to opt into the Bun on `PATH`.
 
-### Scala.js
+## Scala.js quick start
 
 ```scala
 //| mill-version: 1.1.5
 //| mill-jvm-version: system
 //| mvnDeps:
-//| - com.tjclp::mill-bun_mill1:0.2.1
+//| - com.tjclp::mill-bun_mill1:0.3.0
 
 package build
 
 import mill.*
 import mill.bun.bun
-import mill.scalajslib.*
 import mill.scalajslib.api.*
 import mill.scalajslib.bun.*
 
 object app extends BunScalaJSModule {
   override def moduleDir = build.moduleDir
   def scalaVersion = "3.8.2"
+  def scalaJSVersion = "1.22.0"
+
   override def moduleKind = Task { ModuleKind.ESModule }
-  override def bunDeps = Task { Seq(bun"react@^19.0.0") }
-  override def bunBundleTarget = Task { "browser" }
+  override def npmDeps = Task { Seq(bun"lodash@^4.17.21") }
 
   object test extends BunScalaJSTests, TestModule.Utest
 }
 ```
 
-`BunScalaJSModule` inherits Mill's bundled current Scala.js version, so you configure `scalaVersion` on the module but do not override `scalaJSVersion`. If you keep Scala.js sources at the build root such as `src/`, override `moduleDir = build.moduleDir`; otherwise Mill will look under `<module-name>/src`.
-`BunScalaJSTests` runs the Scala.js test bridge on Bun as the JS runtime. For ESM apps, the test linker falls back to CommonJS so Bun can execute the Scala.js test bridge without the temporary `file:` importer failure that affects `bun run -`.
-For published Scala.js libraries that must carry JS runtime dependencies to downstream consumers, mix in `BunPublishModule`. By default it embeds `META-INF/bun/bun-dependencies.json` so consumers keep resolving transitive Bun packages via manifests. If you need to ship a vendored runtime tree as well, set `bunPublishVendoredRuntime = true` and only do so when the resolved closure is platform-independent.
+Scala.js versions are explicit: choose the version your application tests against instead of inheriting a plugin-bundled linker.
 
-### TypeScript
+```bash
+./mill app.bunLock       # generate and commit app/bun.lock (or ./bun.lock with moduleDir above)
+./mill app.run
+./mill app.bundle
+./mill app.compileExecutable
+./mill app.test.test
+```
+
+`BunScalaJSModule` delegates `fastLinkJS`, `fullLinkJS`, and test linking to Mill's standard `ScalaJSModule` hooks. That keeps the plugin compatible with Mill's linker lifecycle and removes its former private linker-worker coupling.
+
+## TypeScript quick start
 
 ```scala
 //| mill-version: 1.1.5
 //| mill-jvm-version: system
 //| mvnDeps:
-//| - com.tjclp::mill-bun_mill1:0.2.1
+//| - com.tjclp::mill-bun_mill1:0.3.0
 
 package build
 
@@ -58,162 +65,137 @@ import mill.javascriptlib.bun.*
 
 object app extends BunTypeScriptModule {
   override def moduleDir = build.moduleDir
-  override def npmDeps = Task { Seq("express@4.21.2") }
-  override def bunBundleTarget = Task { "bun" }
+  override def npmDeps = Task { Seq("hono@^4.9.0") }
 
   object test extends BunTypeScriptTests
 }
 ```
 
-## `bun""` String Interpolator
-
-The `bun"pkg@version"` interpolator provides compile-time validation of Bun package specifiers. Import it with `import mill.bun.bun` and use it in `bunDeps` declarations:
-
-```scala
-import mill.bun.bun
-
-override def bunDeps = Task { Seq(
-  bun"react@^19.0.0",
-  bun"@anthropic-ai/claude-agent-sdk@^0.2.90",
-  bun"zod@^4.0.0"
-)}
+```bash
+./mill app.bunLock
+./mill app.run
+./mill app.bundle
+./mill app.compileExecutable
+./mill app.test.test
 ```
 
-Invalid or empty specifiers are caught at compile time. The interpolator returns a plain `String`, so it works anywhere `npmDeps` or `bunDeps` accepts strings.
+## Web applications
 
-## Modules
+Use the paired web traits when HTML and static assets are part of the application:
 
-### `BunToolchainModule`
+```scala
+object frontend extends BunScalaJSWebModule {
+  def scalaVersion = "3.8.2"
+  def scalaJSVersion = "1.22.0"
+  override def moduleKind = Task { ModuleKind.ESModule }
+}
 
-Base trait providing Bun discovery and execution helpers.
+object admin extends BunTypeScriptWebModule
+```
 
-| Task | Default | Description |
-|------|---------|-------------|
-| `bunExecutableName` | `"bun"` | Command name for PATH lookup |
-| `managedBunExecutable` | `None` | Hook for a downloaded/managed Bun binary |
-| `bunEnv` | `Map.empty` | Environment variables for Bun subprocesses |
-| `bunLinker` | `"hoisted"` | Bun linker strategy |
-| `bunInstallArgs` | `--save-text-lockfile --linker hoisted` | Default install flags |
-| `bunLockfiles` | `Seq("bun.lock", "bun.lockb")` | Lockfile names Bun may produce |
-| `bunfigFiles` | auto-detected | Workspace `bunfig.toml` / `.bunfig.toml` configs |
-| `bunCompileTargets` | `Seq.empty` | Cross-compilation targets (e.g. `"bun-linux-x64"`, `"bun-darwin-arm64"`) |
-| `bunCompileResources` | `Seq.empty` | Extra files/directories for `bun build --compile` workspaces |
+Both traits use `index.html` as the entrypoint, copy `public/`, generate a minimal page when HTML is absent, and emit an optimized `dist` from `bundle`.
 
-### `BunScalaJSModule`
+```bash
+./mill --watch frontend.dev   # reliable Scala.js relink + browser reload
+./mill admin.dev              # Bun-native TypeScript HMR
+./mill frontend.bundle
+./mill admin.bundle
+```
 
-Extends `ScalaJSModule` with Bun runtime and bundling.
+Configure `webEntryPoints`, `webPublicSources`, `webDevPort`, and `webDevArgs` for non-default layouts.
 
-| Task | Default | Description |
-|------|---------|-------------|
-| `npmDeps` | `Seq.empty` | JS packages for `@JSImport` resolution |
-| `npmDevDeps` | `Seq.empty` | Dev-only JS packages |
-| `bunDeps` | `Seq.empty` | JS packages using `bun"pkg@version"` validated syntax |
-| `bunDevDeps` | `Seq.empty` | Dev-only JS packages (independent of `npmDevDeps`) |
-| `bunOptionalDeps` | `Seq.empty` | Optional JS packages — installed if available, not fatal if missing |
-| `unmanagedDeps` | `Seq.empty` | Local tarballs or package directories |
-| `bunPackageJsonExtras` | `ujson.Obj()` | Extra fields merged into generated `package.json` |
-| `transitiveNpmDeps` | — | Merged `npmDeps` + `bunDeps` from this module, upstream deps, and classpath manifests |
-| `transitiveNpmDevDeps` | — | Merged `npmDevDeps` + `bunDevDeps` from this module, upstream deps, and classpath manifests |
-| `classpathBunDeps` | — | Runtime deps auto-populated from dependency JAR manifests |
-| `classpathBunDevDeps` | — | Dev deps auto-populated from dependency JAR manifests |
-| `classpathBunOptionalDeps` | — | Optional deps auto-populated from dependency JAR manifests |
-| `bunBundleTarget` | `"browser"` | `bun build --target` value |
-| `bunBundleFormat` | `None` | Output format (`esm`, `cjs`) |
-| `bunBundleExternal` | `Seq.empty` | Packages treated as external during bundling |
-| `bunBundleSplitting` | `false` | Enable code splitting |
-| `bunBundleBytecode` | `false` | Emit Bun bytecode |
-| `bunBundleArgs` | `Seq.empty` | Extra raw `bun build` flags |
-| `bunBinaryName` | module name | Name for compiled executables |
-| `bunInstall` | — | Runs `bun install` for linked output |
-| `bunBundle` | — | Full Scala.js bundle via `bun build` |
-| `bunBundleFast` | — | Fast bundle from `fastLinkJS` |
-| `bunCompileExecutable` | — | Standalone Bun executable |
-| `bunCompileExecutables` | — | Cross-compile executables per `bunCompileTargets` |
+## Reproducible installs
 
-### `BunWorkersModule`
+Dependency-bearing modules require a source-controlled text `bun.lock` by default. Generate it with the module's `bunLock` command. Normal installs then use `--frozen-lockfile` and fail before resolution when the lock is missing.
 
-Mix into a `BunTypeScriptModule` to bundle worker entry points from the staged compile workspace instead of raw source files.
+For migration or intentionally ephemeral builds, set `MILL_BUN_REQUIRE_LOCKFILE=false` or override `bunRequireLockfile`. `bunInstallExtraArgs` accepts additional flags but cannot disable the plugin's lockfile safety.
 
-| Task | Default | Description |
-|------|---------|-------------|
-| `workerEntryPoints` | — | Worker sources to bundle |
-| `workerSourceRoots` | `Seq(moduleDir)` | Roots used to preserve worker output layout |
-| `workerBundleTarget` | `bunBundleTarget()` | `bun build --target` value for workers |
-| `workerBundleFormat` | `Some(bunBundleFormat())` | Optional worker bundle format |
-| `workerBundleArgs` | `Seq.empty` | Extra raw flags for worker bundling |
-| `bundleWorkers` | — | Bundles all workers under `workers/` while preserving relative paths |
+The dependency model is shared across Scala.js and TypeScript:
 
-### `BunSQLiteModule`
+| Setting | Meaning |
+|---|---|
+| `npmDeps` | Runtime dependencies |
+| `npmDevDeps` | Local development/tool dependencies; never published transitively |
+| `npmOptionalDeps` | Optional runtime dependencies |
+| `npmPeerDeps` | Requirements supplied by the consumer |
+| `npmOverrides` | Explicit resolution for otherwise conflicting declarations |
+| `bunPackageJsonExtras` | Unmodeled fields such as `scripts`; typed dependency fields are rejected here |
 
-Mix into a `BunTypeScriptModule` to discover and include SQLite database files in `bun build --compile` workspaces via `bunCompileResources`.
+The `bun"pkg@specifier"` interpolator is an optional compile-time validator for dependency strings. Unversioned dependencies resolve explicitly to `latest`; contradictory requirements fail unless selected by `npmOverrides`.
 
-| Task | Default | Description |
-|------|---------|-------------|
-| `sqliteDatabases` | `Seq.empty` | Explicit SQLite database files to include |
-| `sqliteDatabaseDir` | `None` | Directory to scan for `.db`, `.sqlite`, `.sqlite3` files |
+## Managed Bun
 
-### `BunTypeScriptModule`
+Resolution order is:
 
-Extends Mill's `TypeScriptModule`, replacing npm/node/esbuild with Bun.
-For top-level modules whose sources live at the workspace root, set `override def moduleDir = build.moduleDir`.
-When Mill's default `src/<module>.ts` entrypoint is absent, the Bun run/bundle tasks fall back to `src/main.ts`, `src/index.ts`, `main.ts`, and `index.ts`.
+1. `bunExecutableOverride`
+2. system `PATH` when `bunUseSystem` or `MILL_BUN_USE_SYSTEM=true`
+3. checksum-verified managed Bun 1.3.14
 
-| Task | Default | Description |
-|------|---------|-------------|
-| `bunRunArgs` | `Seq.empty` | Extra flags for `bun run` |
-| `bunBundleTarget` | `"bun"` | `bun build --target` value |
-| `bunBundleFormat` | `"esm"` or `"cjs"` | Based on `enableEsm` |
-| `bunCompileExecutable` | `false` | Emit standalone executable |
-| `bunBundlePackagesExternal` | `false` | Treat all packages as external |
-| `bunBundleExternal` | `Seq.empty` | Packages treated as external during bundling |
-| `bunBinaryName` | module name | Name for compiled executables |
-| `bunPackageJsonExtras` | `ujson.Obj()` | Extra fields merged into generated `package.json` |
-| `bunBuildArgs` | `Seq.empty` | Extra raw `bun build` flags |
-| `bunTestArgs` | `Seq.empty` | Extra raw `bun test` flags |
-| `bunCompileExecutables` | — | Cross-compile executables per `bunCompileTargets` |
+Use `./mill app.bunDoctor` to print and validate the resolved executable, version, revision, mode, and linker. Custom mirrors or unbundled Bun versions must configure both `bunArchiveUrl` and `bunArchiveSha256`.
 
-Overrides: `npmInstall` (bun install), `compile` (bun x tsc), `run` (bun run), `bundle` (bun build).
-Bundle outputs preserve the compiled workspace layout, including `resources/`, and `bunCompileResources` keep their relative paths beneath the module directory.
-Ambient typings are selected from `bunBundleTarget`: `bun` installs pinned `@types/bun`, `node` installs pinned `@types/node`, and `browser` installs neither.
+## Mixed Scala.js and TypeScript workspaces
 
-**`BunTypeScriptTests`** inner trait for test modules:
+`BunWorkspaceModule` gives multiple packages one install and one root lockfile:
 
-| Task | Default | Description |
-|------|---------|-------------|
-| `bunTestTimeout` | `0` | Test timeout in milliseconds (0 = no timeout) |
-| `bunTestReporter` | `"default"` | Reporter format: `"default"`, `"junit"`, or `"json"` |
-| `bunCoverageReporters` | `Seq("text", "lcov")` | Coverage reporter formats |
+```scala
+import mill.bun.*
 
-Test commands: `test`, `testWatch`, `testUpdateSnapshots`, `coverage`, `coverageReport`.
+object scalaApp extends BunScalaJSModule {
+  def scalaVersion = "3.8.2"
+  def scalaJSVersion = "1.22.0"
+  override def bunWorkspaceInstall = Task { Some(workspace.bunInstall()) }
+}
 
-### `BunPublishModule`
+object tsApp extends BunTypeScriptModule {
+  override def bunWorkspaceInstall = Task { Some(workspace.bunInstall()) }
+}
 
-Mix into a published `BunScalaJSModule` when downstream consumers should receive its runtime JS closure automatically.
+object workspace extends BunWorkspaceModule {
+  def bunWorkspacePackages = Seq(scalaApp, tsApp)
+}
+```
 
-Manifests (`META-INF/bun/bun-dependencies.json`) are always published when the module declares any Bun/npm dependencies. Consumer builds scan classpath JARs for these manifests and merge them into their `package.json` via `classpathBunDeps` / `classpathBunDevDeps` / `classpathBunOptionalDeps`.
+Run `./mill workspace.bunLock` once, commit `workspace/bun.lock`, and use either package normally. The generated root uses Bun workspaces and both member modules link to the same installed `node_modules`.
 
-Optionally, enable `bunPublishVendoredRuntime = true` to also embed a vendored `node_modules` tree in the JAR. This gives consumers the exact resolved packages without running `bun install` for those transitive deps. Only enable this when the resolved closure is platform-independent — Bun installs can materialize host-specific binaries.
+## Publishing Scala.js libraries
 
-| Task | Default | Description |
-|------|---------|-------------|
-| `bunPublishVendoredRuntime` | `false` | Embed `META-INF/bun/node_modules/**` from a local Bun install |
-| `bunDependencyManifest` | — | Writes `META-INF/bun/bun-dependencies.json` for this module's direct runtime JS deps |
-| `bunPublishedRuntimeInstall` | — | Resolves this module's direct runtime JS closure in an isolated install workspace |
-| `bunVendoredRuntimeBundle` | — | Emits `META-INF/bun/node_modules/**` when vendored publishing is enabled |
+Mix `BunPublishModule` into a published Scala.js library to emit `META-INF/bun/bun-dependencies.json`:
 
-## Examples
+```scala
+object ui extends BunScalaJSModule with BunPublishModule {
+  def scalaVersion = "3.8.2"
+  def scalaJSVersion = "1.22.0"
+  override def npmPeerDeps = Task { Seq("react@^19.0.0") }
+}
+```
 
-See `example-scalajs/` and `example-typescript/` for complete consumer projects, and `examples/build.mill` for the broader multi-module example matrix used during development.
+Manifest schema v2 publishes direct runtime, optional, and peer requirements. Development dependencies remain local. Consumers still read schema v1 manifests, but malformed metadata and contradictory requirements fail clearly instead of being ignored or resolved by order.
+
+`bunPublishVendoredRuntime = true` can additionally embed `node_modules`; use it only for platform-independent dependency closures.
+
+## Main modules and tasks
+
+- `BunToolchainModule`: managed/system Bun resolution, lock policy, environment, install flags, and `bunDoctor`.
+- `BunScalaJSModule`: Scala.js linking, Bun runtime, `bundle`, `bundleFast`, and executable compilation.
+- `BunTypeScriptModule`: Bun-backed install, TypeScript compile, run, bundle, tests, and executables.
+- `BunScalaJSWebModule` / `BunTypeScriptWebModule`: paired HTML development and production builds.
+- `BunWorkspaceModule`: one install and lockfile for mixed package graphs.
+- `BunPublishModule`: transitive npm metadata for published Scala.js libraries.
+- `BunWorkersModule`: bundles TypeScript worker entrypoints while preserving layout.
+- `BunSQLiteModule`: stages SQLite resources for compiled executables.
+
+The older Scala.js `bunBundle*` and `bunCompile*` names remain as compatibility aliases during the 0.x migration. New code should use the idiomatic `bundle*` and `compile*` names.
 
 ## Development
 
 ```bash
-./mill millbun.compile       # Compile the plugin
-./mill millbun.test          # Unit tests
-./mill millbun.integration   # Integration tests (requires Bun on PATH)
+./mill --no-server millbun.compile
+./mill --no-server millbun.test
+MILL_BUN_USE_SYSTEM=true MILL_BUN_REQUIRE_LOCKFILE=false \
+  ./mill --no-server millbun.integration
 ```
 
-See `docs/RELEASING.md` for the tag-driven Maven Central release workflow.
+See [the 0.3 migration guide](docs/MIGRATING-0.3.md), the runnable `example-*` projects, and [the release runbook](docs/RELEASING.md).
 
 ## License
 

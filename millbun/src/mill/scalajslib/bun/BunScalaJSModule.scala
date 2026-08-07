@@ -4,14 +4,13 @@ package bun
 import mill.*
 import mill.api.BuildCtx
 import mill.api.JsonFormatters.given
-import mill.bun.{BunManifest, BunToolchainModule, BunVendoredNodeModules}
+import mill.bun.{BunManifest, BunPackageModule, BunToolchainModule, BunVendoredNodeModules}
 import mill.javalib.JavaModule
 import mill.scalajslib.*
 import mill.scalajslib.api.*
-import mill.scalajslib.config.ScalaJSConfigModule
 
 import scala.annotation.tailrec
-trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { outer =>
+trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule with BunPackageModule { outer =>
 
   /** JS packages needed by linked Scala.js output, e.g. packages referenced by @JSImport. */
   def npmDeps: T[Seq[String]] = Task { Seq.empty }
@@ -77,16 +76,23 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
   }
 
   def transitiveNpmDevDeps: T[Seq[String]] = Task {
-    val moduleNpm = Task.traverse(recursiveInstallBunModuleDeps)(_.npmDevDeps)().flatten
-    val moduleBun = Task.traverse(recursiveInstallBunModuleDeps)(_.bunDevDeps)().flatten
-    moduleNpm ++ moduleBun ++ classpathBunDevDeps() ++ npmDevDeps() ++ bunDevDeps()
+    npmDevDeps() ++ bunDevDeps()
   }
 
   def transitiveUnmanagedDeps: T[Seq[PathRef]] = Task {
     Task.traverse(recursiveInstallBunModuleDeps)(_.unmanagedDeps)().flatten ++ unmanagedDeps()
   }
 
+  override def bunWorkspaceUnmanagedDeps: T[Seq[PathRef]] = transitiveUnmanagedDeps
+
   /** Optional JS packages — installed if available, not fatal if missing. */
+  def npmOptionalDeps: T[Seq[String]] = Task { Seq.empty }
+
+  /** Peer JS packages that must be supplied by the consuming application. */
+  def npmPeerDeps: T[Seq[String]] = Task { Seq.empty }
+
+  /** @deprecated Use [[npmOptionalDeps]]. */
+  @deprecated("Use npmOptionalDeps", "0.3.0")
   def bunOptionalDeps: T[Seq[String]] = Task { Seq.empty }
 
   // ---------------------------------------------------------------------------
@@ -98,7 +104,10 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
     classpathBunManifests().flatMap(_.dependencies).map { case (name, version) => s"$name@$version" }
   }
 
-  /** Scan classpath JARs for embedded bun dev-dependency manifests. */
+  /** Read legacy schema v1 development metadata for diagnostics.
+    * @deprecated Development dependencies are not transitive in schema v2.
+    */
+  @deprecated("Development dependencies are local and no longer transitive", "0.3.0")
   def classpathBunDevDeps: T[Seq[String]] = Task {
     classpathBunManifests().flatMap(_.devDependencies).map { case (name, version) => s"$name@$version" }
   }
@@ -106,6 +115,11 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
   /** Scan classpath JARs for embedded bun optional-dependency manifests. */
   def classpathBunOptionalDeps: T[Seq[String]] = Task {
     classpathBunManifests().flatMap(_.optionalDependencies).map { case (name, version) => s"$name@$version" }
+  }
+
+  /** Peer packages declared by published Scala.js libraries. */
+  def classpathBunPeerDeps: T[Seq[String]] = Task {
+    classpathBunManifests().flatMap(_.peerDependencies).map { case (name, version) => s"$name@$version" }
   }
 
   /** Manifests from classpath entries that do NOT carry vendored node_modules.
@@ -161,23 +175,40 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
     if (name.nonEmpty) name.split('.').last.replace('.', '-') else "app"
   }
 
+  @deprecated("Use transitiveNpmOptionalDeps", "0.3.0")
   def transitiveBunOptionalDeps: T[Seq[String]] = Task {
-    val moduleOptional = Task.traverse(recursiveInstallBunModuleDeps)(_.bunOptionalDeps)().flatten
-    moduleOptional ++ classpathBunOptionalDeps() ++ bunOptionalDeps()
+    val moduleOptional = Task.traverse(recursiveInstallBunModuleDeps)(module => Task.Anon {
+      module.npmOptionalDeps() ++ module.bunOptionalDeps()
+    })().flatten
+    moduleOptional ++ classpathBunOptionalDeps() ++ npmOptionalDeps() ++ bunOptionalDeps()
   }
 
-  private def mkBunPackageJson: Task[Unit] = Task.Anon {
-    val dest = Task.dest
-    val allOptional = transitiveBunOptionalDeps().map(BunToolchainModule.splitDep)
+  def transitiveNpmOptionalDeps: T[Seq[String]] = Task { transitiveBunOptionalDeps() }
+
+  def transitiveNpmPeerDeps: T[Seq[String]] = Task {
+    val modulePeers = Task.traverse(recursiveInstallBunModuleDeps)(_.npmPeerDeps)().flatten
+    modulePeers ++ classpathBunPeerDeps() ++ npmPeerDeps()
+  }
+
+  override def bunWorkspacePackageName: T[String] = Task { defaultPackageName }
+
+  override def bunWorkspacePackageJson: T[ujson.Obj] = Task {
+    val overrides = npmOverrides()
+    val allOptional = BunToolchainModule.dependencyPairs(transitiveNpmOptionalDeps(), overrides)
+    val allPeers = BunToolchainModule.dependencyPairs(transitiveNpmPeerDeps(), overrides)
     val base = ujson.Obj(
       "name" -> defaultPackageName,
       "private" -> true,
       "version" -> "0.0.0",
-      "dependencies" -> ujson.Obj.from(transitiveNpmDeps().map(BunToolchainModule.splitDep)),
-      "devDependencies" -> ujson.Obj.from(transitiveNpmDevDeps().map(BunToolchainModule.splitDep))
+      "dependencies" -> ujson.Obj.from(BunToolchainModule.dependencyPairs(transitiveNpmDeps(), overrides)),
+      "devDependencies" -> ujson.Obj.from(BunToolchainModule.dependencyPairs(transitiveNpmDevDeps(), overrides))
     )
     if allOptional.nonEmpty then
       base("optionalDependencies") = ujson.Obj.from(allOptional)
+    if allPeers.nonEmpty then
+      base("peerDependencies") = ujson.Obj.from(allPeers)
+    if overrides.nonEmpty then
+      base("overrides") = ujson.Obj.from(overrides.toSeq.sortBy(_._1).map((name, value) => name -> ujson.Str(value)))
 
     val packageType =
       moduleKind() match {
@@ -187,8 +218,15 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
 
     packageType.foreach(tpe => base("type") = tpe)
 
-    val merged = ujson.Obj.from(base.value.toSeq ++ bunPackageJsonExtras().value.toSeq)
-    os.write.over(dest / "package.json", merged.render(indent = 2), createFolders = true)
+    BunToolchainModule.mergePackageJson(base, bunPackageJsonExtras())
+  }
+
+  private def mkBunPackageJson: Task[Unit] = Task.Anon {
+    os.write.over(
+      Task.dest / "package.json",
+      bunWorkspacePackageJson().render(indent = 2),
+      createFolders = true
+    )
   }
 
   private def mergeVendoredNodeModules(entries: Seq[os.Path], destNodeModules: os.Path): Unit =
@@ -211,23 +249,75 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
     val hasInstallInputs =
       transitiveNpmDeps().nonEmpty ||
         transitiveNpmDevDeps().nonEmpty ||
-        transitiveBunOptionalDeps().nonEmpty ||
+        transitiveNpmOptionalDeps().nonEmpty ||
+        transitiveNpmPeerDeps().nonEmpty ||
         transitiveUnmanagedDeps().nonEmpty ||
         bunPackageJsonExtras().value.nonEmpty
 
-    if hasInstallInputs then
-      runBun(
-        bunExecutable(),
-        Seq("install") ++ bunInstallArgs() ++ transitiveUnmanagedDeps().map(_.path.toString),
-        cwd = dest,
-        env = bunEnv()
-      )
+    bunWorkspaceInstall() match
+      case Some(workspaceInstall) =>
+        val installed = workspaceInstall.path
+        if os.exists(installed / "node_modules") then
+          os.symlink(dest / "node_modules", installed / "node_modules")
+        bunLockfiles().foreach { name =>
+          val source = installed / name
+          if os.exists(source) then os.symlink(dest / name, source)
+        }
+      case None =>
+        val lockfile = bunLockfile()
+        requireBunLockfile(hasInstallInputs, lockfile, bunRequireLockfile())
+        copyBunLockfile(lockfile, dest)
+
+        if hasInstallInputs then
+          runBun(
+            bunExecutable(),
+            Seq("install") ++ resolvedBunInstallArgs(
+              bunInstallArgs(),
+              bunInstallExtraArgs(),
+              lockfile.nonEmpty,
+              updateLockfile = false
+            ) ++ transitiveUnmanagedDeps().map(_.path.toString),
+            cwd = dest,
+            env = bunEnv()
+          )
 
     val ownResourceRoots = resources().map(_.path).toSet
     val vendoredEntries = runClasspath().map(_.path).filterNot(ownResourceRoots.contains)
     mergeVendoredNodeModules(vendoredEntries, dest / "node_modules")
 
     PathRef(dest)
+  }
+
+  /** Resolve dependencies and update the source-controlled `bun.lock`. */
+  def bunLock(): Command[PathRef] = Task.Command {
+    if bunWorkspaceInstall().nonEmpty then
+      Task.fail("This package uses a Bun workspace. Run the workspace module's bunLock command.")
+    val dest = Task.dest
+    os.makeDir.all(dest)
+    if (os.exists(npmRc().path)) os.copy.over(npmRc().path, dest / ".npmrc", createFolders = true)
+    bunfigFiles().foreach { cfg =>
+      os.copy.over(cfg.path, dest / cfg.path.last, createFolders = true)
+    }
+    mkBunPackageJson()
+    copyBunLockfile(bunLockfile(), dest)
+
+    runBun(
+      bunExecutable(),
+      Seq("install") ++ resolvedBunInstallArgs(
+        bunInstallArgs(),
+        bunInstallExtraArgs(),
+        bunLockfile().nonEmpty,
+        updateLockfile = true
+      ) ++ transitiveUnmanagedDeps().map(_.path.toString),
+      cwd = dest,
+      env = bunEnv()
+    )
+
+    val generated = dest / "bun.lock"
+    if (!os.exists(generated)) Task.fail("Bun did not generate bun.lock")
+    val sourceLock = moduleDir / "bun.lock"
+    os.copy.over(generated, sourceLock, createFolders = true)
+    PathRef(sourceLock)
   }
 
   private def resolvedBunConfigs: Task[Seq[PathRef]] = Task.Anon {
@@ -312,7 +402,8 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
       )
   }
 
-  def bunBundle: T[PathRef] = Task {
+  /** Canonical production bundle task. */
+  def bundle: T[PathRef] = Task {
     val linked = fullLinkJS()
 
     val outDir = Task.dest / "dist"
@@ -342,7 +433,11 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
     PathRef(outDir)
   }
 
-  def bunBundleFast: T[PathRef] = Task {
+  @deprecated("Use bundle", "0.3.0")
+  def bunBundle: T[PathRef] = Task { bundle() }
+
+  /** Canonical fast-development bundle task. */
+  def bundleFast: T[PathRef] = Task {
     val linked = fastLinkJS()
 
     val outDir = Task.dest / "dist"
@@ -370,11 +465,14 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
     PathRef(outDir)
   }
 
+  @deprecated("Use bundleFast", "0.3.0")
+  def bunBundleFast: T[PathRef] = Task { bundleFast() }
+
   private def copyCompileResources(resources: Seq[PathRef], dest: os.Path): Unit =
     BunToolchainModule.copyPathRefs(resources, dest, Seq(moduleDir))
 
-  /** Convenience task for server-side Scala.js entrypoints. */
-  def bunCompileExecutable: T[PathRef] = Task {
+  /** Build a server-side Scala.js entrypoint as a standalone executable. */
+  def compileExecutable: T[PathRef] = Task {
     val linked = fullLinkJS()
     val buildDir = Task.dest / "workspace"
     BunToolchainModule.copyWorkspace(linked.dest.path, buildDir)
@@ -401,11 +499,14 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
     PathRef(outFile)
   }
 
+  @deprecated("Use compileExecutable", "0.3.0")
+  def bunCompileExecutable: T[PathRef] = Task { compileExecutable() }
+
   /**
    * Cross-compile standalone executables for each configured target.
    * Returns a map of target name to executable PathRef.
    */
-  def bunCompileExecutables: T[Map[String, PathRef]] = Task {
+  def compileExecutables: T[Map[String, PathRef]] = Task {
     val targets = bunCompileTargets()
     if (targets.isEmpty) Task.fail("bunCompileTargets is empty. Set targets like Seq(\"bun-linux-x64\", \"bun-darwin-arm64\").")
 
@@ -440,7 +541,10 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
     }.toMap
   }
 
-  trait BunScalaJSTests extends ScalaJSConfigTests {
+  @deprecated("Use compileExecutables", "0.3.0")
+  def bunCompileExecutables: T[Map[String, PathRef]] = Task { compileExecutables() }
+
+  trait BunScalaJSTests extends ScalaJSTests {
     override def moduleKind: T[ModuleKind] = Task {
       outer.moduleKind() match {
         // Bun rejects the temporary file:-URL importer that Scala.js' Node env
@@ -489,27 +593,9 @@ trait BunScalaJSModule extends ScalaJSConfigModule with BunToolchainModule { out
     }
 
     override protected def testLinkTask: Task[Report] = Task.Anon {
-      val linkConfig =
-        outer.moduleKind() match {
-          case ModuleKind.ESModule =>
-            outer.scalaJSConfig().withModuleKind(org.scalajs.linker.interface.ModuleKind.CommonJSModule)
-          case _ =>
-            outer.scalaJSConfig()
-        }
-
-      linkJs(
-        worker = mill.scalajslib.config.worker.ScalaJSConfigWorkerExternalModule.scalaJSWorker(),
-        toolsClasspath = scalaJSToolsClasspath(),
-        runClasspath = scalaJSTestDeps() ++ runClasspath(),
-        moduleInitializers = testModuleInitializers(),
-        forceOutJs = false,
-        testBridgeInit = true,
-        importMap = scalaJSImportMap(),
-        config = linkConfig
-      ).map { linked =>
-        outer.ensureLinkedWorkspace(linked, outer.bunInstall().path, outer.bunLockfiles(), outer.resolvedBunConfigs())
-        linked
-      }
+      val linked = super.testLinkTask()
+      outer.ensureLinkedWorkspace(linked, outer.bunInstall().path, outer.bunLockfiles(), outer.resolvedBunConfigs())
+      linked
     }
 
     /** Run Scala.js tests through Mill's test bridge with Bun as the JS runtime. */

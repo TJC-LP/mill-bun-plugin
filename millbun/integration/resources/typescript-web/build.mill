@@ -8,15 +8,15 @@ package build
 import mill.*
 import mill.javascriptlib.bun.*
 
-object app extends BunTypeScriptModule {
+object app extends BunTypeScriptWebModule {
   override def moduleDir = build.moduleDir
-  override def npmDevDeps = Task { Seq("typescript@5.7.3") }
+  override def enableEsm = Task { true }
+  override def bunBundleTarget = Task { "browser" }
   override def compilerOptions = Task {
     super.compilerOptions() ++ Map(
       "module" -> ujson.Str("esnext"),
-      "moduleResolution" -> ujson.Str("bundler")
+      "moduleResolution" -> ujson.Str("bundler"),
+      "lib" -> ujson.Arr("es2020", "dom")
     )
   }
-  override def bunBundleTarget = Task { "bun" }
-  override def bunCompileResources = Task.Sources("embedded")
 }

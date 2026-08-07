@@ -11,6 +11,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Tag-driven release workflow for Maven Central publishing and GitHub releases.
 - Release runbook covering secrets, version sweep, annotated tags, and verification.
+- Checksum-verified managed Bun 1.3.14 for macOS, Linux, and Windows on x64 and arm64.
+- Strict text-lockfile workflow with `bunLock`, frozen installs, and actionable missing-lock failures.
+- Canonical `bundle`, `bundleFast`, `compileExecutable`, and `compileExecutables` task names.
+- Paired `BunScalaJSWebModule` and `BunTypeScriptWebModule` HTML workflows.
+- `npmOptionalDeps`, `npmPeerDeps`, `npmOverrides`, and deterministic dependency conflict detection.
+- `BunWorkspaceModule` for one install and lockfile across mixed Scala.js/TypeScript packages.
+- Published dependency manifest schema v2 with runtime, optional, and peer requirements.
+- `bunDoctor` diagnostics and managed-toolchain CI smoke coverage.
+
+### Changed
+
+- Scala.js linking delegates to Mill's standard linker hooks; applications now choose `scalaJSVersion` explicitly.
+- Development dependencies are local tooling inputs and are no longer published transitively.
+- `bunPackageJsonExtras` rejects dependency fields now represented by typed settings.
+- Missing dependency versions are represented as `latest` instead of an empty package.json value.
+
+### Deprecated
+
+- Scala.js `bunBundle*` and `bunCompile*` task names in favor of their canonical aliases.
+- `bunOptionalDeps` in favor of `npmOptionalDeps`.
+- `managedBunExecutable` in favor of `bunExecutableOverride`.
+- The TypeScript `bunCompileExecutable: Boolean` switch in favor of the `compileExecutable` task.
 
 ## [0.2.1] - Overridable test-time JS env (2026-04-17)
 
@@ -40,4 +62,3 @@ object test extends BunScalaJSTests:
     super.bunTestJsEnv() + ("NODE_ENV" -> "production")
   }
 ```
-
