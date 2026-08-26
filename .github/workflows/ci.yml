@@ -3,7 +3,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 jobs:
   build:
@@ -29,7 +28,12 @@ jobs:
       - name: Unit Tests
         run: ./mill --no-server millbun.test
 
+      # The suite defaults to the managed toolchain; this job pins system Bun to the same
+      # version so `findOnPath` resolution and version verification keep CI coverage, while
+      # the managed-bun job covers the download/cache path.
       - name: Integration Tests
+        env:
+          MILL_BUN_USE_SYSTEM: 'true'
         run: ./mill --no-server millbun.integration
 
   managed-bun:

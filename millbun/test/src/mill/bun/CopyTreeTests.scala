@@ -56,6 +56,21 @@ object CopyTreeTests extends TestSuite:
       assert(os.isLink(dest / "alias.js"))
       assert(os.read(dest / "alias.js") == "real")
 
+    test("relative symlink targets are preserved verbatim"):
+      // bun's node_modules/.bin entries are relative links; absolutizing them would point the
+      // copy back into the source tree, dangling as soon as the source task is cleaned.
+      val source = os.temp.dir()
+      os.write(source / "esbuild" / "bin" / "esbuild", "#!/usr/bin/env node", createFolders = true)
+      os.makeDir.all(source / ".bin")
+      os.symlink(source / ".bin" / "esbuild", os.RelPath("../esbuild/bin/esbuild"))
+
+      val dest = os.temp.dir()
+      BunToolchainModule.copyTree(source, dest)
+      assert(os.readLink(dest / ".bin" / "esbuild") == os.RelPath("../esbuild/bin/esbuild"))
+      // Self-contained: the copied link resolves inside the copy even after the source vanishes.
+      os.remove.all(source)
+      assert(os.read(dest / ".bin" / "esbuild") == "#!/usr/bin/env node")
+
     test("nested directories and empty directories are preserved"):
       val source = os.temp.dir()
       os.makeDir.all(source / "empty")
