@@ -39,6 +39,14 @@ object BunWorkspaceIntegrationTests extends TestSuite:
       assert(os.exists(workspaceInstall / "node_modules" / "is-even" / "package.json"))
       assert(os.exists(workspaceInstall / "node_modules" / "is-odd" / "package.json"))
 
+      // Unmanaged local packages arrive as file: specifiers with vendor trees staged beside the
+      // member's package.json — never as positional install args, which turn `bun install` into
+      // `bun add` and are unconditionally rejected by --frozen-lockfile.
+      val scalaJson = ujson.read(os.read(workspaceInstall / "packages" / "scalaApp" / "package.json"))
+      assert(scalaJson("dependencies").obj("shared-local").str == "file:./vendor/shared-local")
+      assert(os.exists(workspaceInstall / "packages" / "scalaApp" / "vendor" / "shared-local" / "package.json"))
+      assert(!os.read(workspaceInstall / ".workspace-installed").contains("shared-local"))
+
       val scalaResult = tester.eval("scalaApp.bunInstall")
       val typescriptResult = tester.eval("typescriptApp.npmInstall")
       assert(scalaResult.isSuccess)

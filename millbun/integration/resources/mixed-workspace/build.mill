@@ -16,6 +16,7 @@ object scalaApp extends BunScalaJSModule {
   def scalaJSVersion = "1.22.0"
   override def moduleKind = Task { ModuleKind.ESModule }
   override def npmDeps = Task { Seq("is-even@1.0.0") }
+  override def unmanagedDeps = Task.Sources(moduleDir / "shared-local")
   override def classpathBunDeps = Task { Seq.empty }
   override def classpathBunOptionalDeps = Task { Seq.empty }
   override def classpathBunPeerDeps = Task { Seq.empty }

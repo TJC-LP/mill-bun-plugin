@@ -93,7 +93,10 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
         name = if (user.name.nonEmpty) user.name else moduleName,
         version = if (user.version.nonEmpty) user.version else "1.0.0",
         `type` = if (enableEsm()) "module" else user.`type`,
-        dependencies = ujson.Obj.from(BunToolchainModule.dependencyPairs(transitiveNpmDeps(), overrides)),
+        dependencies = ujson.Obj.from(BunToolchainModule.dependencyPairsWithUnmanaged(
+          BunToolchainModule.dependencyPairs(transitiveNpmDeps(), overrides),
+          transitiveUnmanagedDeps()
+        )),
         devDependencies = ujson.Obj.from(BunToolchainModule.dependencyPairs(transitiveNpmDevDeps() ++ tsDeps(), overrides))
       ).cleanJson.obj.toSeq
     )
@@ -163,6 +166,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
         val lockfile = bunLockfile()
         requireBunLockfile(true, lockfile, bunRequireLockfile())
         copyBunLockfile(lockfile, dest)
+        BunToolchainModule.stageUnmanagedDeps(transitiveUnmanagedDeps(), dest)
 
         runBun(
           bunExecutable(),
@@ -171,7 +175,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
             bunInstallExtraArgs(),
             lockfile.nonEmpty,
             updateLockfile = false
-          ) ++ transitiveUnmanagedDeps().map(_.path.toString),
+          ),
           cwd = dest,
           env = bunToolEnv()
         )
@@ -188,6 +192,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
     mkBunPackageJson()
     copyBunWorkspaceConfigs()
     copyBunLockfile(bunLockfile(), dest)
+    BunToolchainModule.stageUnmanagedDeps(transitiveUnmanagedDeps(), dest)
 
     runBun(
       bunExecutable(),
@@ -196,7 +201,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
         bunInstallExtraArgs(),
         bunLockfile().nonEmpty,
         updateLockfile = true
-      ) ++ transitiveUnmanagedDeps().map(_.path.toString),
+      ),
       cwd = dest,
       env = bunToolEnv()
     )
@@ -442,7 +447,10 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
     def bunTestPackageJson: T[ujson.Obj] = Task {
       val user = outer.packageJson()
       val overrides = outer.npmOverrides()
-      val outerDeps = BunToolchainModule.dependencyPairs(outer.transitiveNpmDeps(), overrides)
+      val outerDeps = BunToolchainModule.dependencyPairsWithUnmanaged(
+        BunToolchainModule.dependencyPairs(outer.transitiveNpmDeps(), overrides),
+        (outer.transitiveUnmanagedDeps() ++ this.transitiveUnmanagedDeps()).distinct
+      )
       val outerDevDeps =
         BunToolchainModule.dependencyPairs(outer.transitiveNpmDevDeps() ++ outer.tsDeps(), overrides)
       val outerPackageNames = (outerDeps.iterator ++ outerDevDeps.iterator).map(_._1).toSet
@@ -511,6 +519,10 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
           lockfilePath = moduleDir / "bun.lock"
         )
         outer.copyBunLockfile(lockfile, dest)
+        BunToolchainModule.stageUnmanagedDeps(
+          (outer.transitiveUnmanagedDeps() ++ this.transitiveUnmanagedDeps()).distinct,
+          dest
+        )
 
         outer.runBun(
           outer.bunExecutable(),
@@ -519,8 +531,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
             outer.bunInstallExtraArgs(),
             lockfile.nonEmpty,
             updateLockfile = false
-          ) ++ (outer.transitiveUnmanagedDeps() ++ this.transitiveUnmanagedDeps())
-            .distinct.map(_.path.toString),
+          ),
           cwd = dest,
           env = outer.bunToolEnv()
         )
@@ -545,6 +556,10 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
       )
       outer.copyBunWorkspaceConfigs()
       outer.copyBunLockfile(this.bunLockfile(), dest)
+      BunToolchainModule.stageUnmanagedDeps(
+        (outer.transitiveUnmanagedDeps() ++ this.transitiveUnmanagedDeps()).distinct,
+        dest
+      )
 
       outer.runBun(
         outer.bunExecutable(),
@@ -553,8 +568,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
           outer.bunInstallExtraArgs(),
           this.bunLockfile().nonEmpty,
           updateLockfile = true
-        ) ++ (outer.transitiveUnmanagedDeps() ++ this.transitiveUnmanagedDeps())
-          .distinct.map(_.path.toString),
+        ),
         cwd = dest,
         env = outer.bunToolEnv()
       )

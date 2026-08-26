@@ -39,7 +39,13 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule with BunPac
     */
   def bunDevDeps: T[Seq[String]] = Task { Seq.empty }
 
-  /** Local tarballs / package directories. */
+  /**
+   * Local package directories, each containing a `package.json` with a name.
+   *
+   * Every entry is staged into `vendor/` beside the generated package.json and declared as a
+   * `file:./vendor/<name>` dependency, so the recorded lockfile entry stays independent of the
+   * checkout path and frozen installs work. Tarballs are not supported — unpack them.
+   */
   def unmanagedDeps: T[Seq[PathRef]] = Task { Seq.empty }
 
   private def npmRc = Task.Source(BuildCtx.workspaceRoot / ".npmrc")
@@ -200,7 +206,10 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule with BunPac
       "name" -> defaultPackageName,
       "private" -> true,
       "version" -> "0.0.0",
-      "dependencies" -> ujson.Obj.from(BunToolchainModule.dependencyPairs(transitiveNpmDeps(), overrides)),
+      "dependencies" -> ujson.Obj.from(BunToolchainModule.dependencyPairsWithUnmanaged(
+        BunToolchainModule.dependencyPairs(transitiveNpmDeps(), overrides),
+        transitiveUnmanagedDeps()
+      )),
       "devDependencies" -> ujson.Obj.from(BunToolchainModule.dependencyPairs(transitiveNpmDevDeps(), overrides))
     )
     if allOptional.nonEmpty then
@@ -282,6 +291,7 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule with BunPac
         copyBunLockfile(lockfile, dest)
 
         if hasInstallInputs then
+          BunToolchainModule.stageUnmanagedDeps(transitiveUnmanagedDeps(), dest)
           runBun(
             bunExecutable(),
             Seq("install") ++ resolvedBunInstallArgs(
@@ -289,7 +299,7 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule with BunPac
               bunInstallExtraArgs(),
               lockfile.nonEmpty,
               updateLockfile = false
-            ) ++ transitiveUnmanagedDeps().map(_.path.toString),
+            ),
             cwd = dest,
             env = bunEnv()
           )
@@ -310,6 +320,7 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule with BunPac
       os.copy.over(cfg.path, dest / cfg.path.last, createFolders = true)
     }
     mkBunPackageJson()
+    BunToolchainModule.stageUnmanagedDeps(transitiveUnmanagedDeps(), dest)
     copyBunLockfile(bunLockfile(), dest)
 
     runBun(
@@ -319,7 +330,7 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule with BunPac
         bunInstallExtraArgs(),
         bunLockfile().nonEmpty,
         updateLockfile = true
-      ) ++ transitiveUnmanagedDeps().map(_.path.toString),
+      ),
       cwd = dest,
       env = bunEnv()
     )

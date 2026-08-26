@@ -67,13 +67,16 @@ trait BunWorkspaceModule extends BunToolchainModule:
     if duplicateDirectories.nonEmpty then
       Task.fail(s"Bun workspace package names map to duplicate directories: ${duplicateDirectories.mkString(", ")}")
 
-    packages.foreach { case (name, json, _) =>
+    packages.foreach { case (name, json, unmanaged) =>
       val directory = packageDirectory(name)
       os.write.over(
         Task.dest / "packages" / directory / "package.json",
         json.render(indent = 2),
         createFolders = true
       )
+      // Members declare local packages as `file:./vendor/<name>` relative to their own
+      // package.json, so their vendor trees live beside it in the layout.
+      BunToolchainModule.stageUnmanagedDeps(unmanaged, Task.dest / "packages" / directory)
     }
 
     val root = ujson.Obj(
@@ -122,7 +125,7 @@ trait BunWorkspaceModule extends BunToolchainModule:
         bunInstallExtraArgs(),
         lockfile.nonEmpty,
         updateLockfile = false
-      ) ++ packages.flatMap(_._3).map(_.path.toString),
+      ),
       cwd = Task.dest,
       env = bunEnv()
     )
@@ -131,7 +134,6 @@ trait BunWorkspaceModule extends BunToolchainModule:
 
   /** Resolve the full workspace and update its source-controlled `bun.lock`. */
   def bunLock(): Command[PathRef] = Task.Command {
-    val packages = resolvedPackages()
     BunToolchainModule.copyWorkspace(bunWorkspaceLayout().path, Task.dest)
     copyConfigs(Task.dest, npmRc().path, bunfigFiles())
     copyBunLockfile(bunLockfile(), Task.dest)
@@ -143,7 +145,7 @@ trait BunWorkspaceModule extends BunToolchainModule:
         bunInstallExtraArgs(),
         bunLockfile().nonEmpty,
         updateLockfile = true
-      ) ++ packages.flatMap(_._3).map(_.path.toString),
+      ),
       cwd = Task.dest,
       env = bunEnv()
     )

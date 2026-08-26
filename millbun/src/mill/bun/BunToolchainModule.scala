@@ -301,6 +301,78 @@ object BunToolchainModule {
     }
   }
 
+  /**
+   * npm dependency pairs plus `file:` pairs for local (unmanaged) packages.
+   *
+   * Local paths must arrive through the generated package.json, never as positional
+   * `bun install` arguments: a positional path turns the invocation into `bun add`, which
+   * `--frozen-lockfile` unconditionally rejects — so unmanaged deps could never install against
+   * a lockfile at all. The specifier points under `vendor/` beside the package.json (staged by
+   * [[stageUnmanagedDeps]]), so the recorded lock entry (`file:vendor/<name>`) is independent
+   * of where the repository is checked out.
+   */
+  private[mill] def dependencyPairsWithUnmanaged(
+      npm: Seq[(String, ujson.Str)],
+      unmanaged: Seq[PathRef]
+  ): Seq[(String, ujson.Str)] = {
+    val filePairs = unmanagedDependencyPairs(unmanaged)
+    val collisions = npm.map(_._1).toSet.intersect(filePairs.map(_._1).toSet).toSeq.sorted
+    if (collisions.nonEmpty) {
+      throw new IllegalArgumentException(
+        s"Declared both as an npm dependency and in unmanagedDeps: ${collisions.mkString(", ")}. " +
+          "A package can be resolved from the registry or from a local directory, not both."
+      )
+    }
+    npm ++ filePairs
+  }
+
+  private[bun] def unmanagedDependencyPairs(deps: Seq[PathRef]): Seq[(String, ujson.Str)] = {
+    val named = deps.map(_.path).distinct.map(path => unmanagedPackageName(path) -> path)
+    val duplicates = named.groupBy(_._1).collect {
+      case (name, entries) if entries.map(_._2).distinct.size > 1 =>
+        s"$name (${entries.map(_._2).distinct.mkString(", ")})"
+    }.toSeq.sorted
+    if (duplicates.nonEmpty) {
+      throw new IllegalArgumentException(
+        s"Multiple unmanagedDeps declare the same package name: ${duplicates.mkString("; ")}."
+      )
+    }
+    named.distinctBy(_._1).sortBy(_._1).map { case (name, _) =>
+      name -> ujson.Str(s"file:./vendor/${vendorDirectoryName(name)}")
+    }
+  }
+
+  private[bun] def unmanagedPackageName(source: os.Path): String = {
+    if (!os.isDir(source)) {
+      throw new IllegalArgumentException(
+        s"Unmanaged Bun dependency $source is not a directory. Point unmanagedDeps at unpacked " +
+          "package directories containing a package.json."
+      )
+    }
+    val packageJson = source / "package.json"
+    if (!os.exists(packageJson)) {
+      throw new IllegalArgumentException(s"Unmanaged Bun dependency $source has no package.json.")
+    }
+    ujson.read(os.read(packageJson)).obj.get("name") match {
+      case Some(ujson.Str(name)) if name.nonEmpty => name
+      case _ =>
+        throw new IllegalArgumentException(s"$packageJson does not declare a package name.")
+    }
+  }
+
+  /** Scoped names need one path segment: `@scope/pkg` becomes `scope+pkg`, as in Bun workspaces. */
+  private[bun] def vendorDirectoryName(name: String): String =
+    name.stripPrefix("@").replace('/', '+')
+
+  /** Copy each unmanaged package into `vendor/` beside the generated package.json. */
+  private[mill] def stageUnmanagedDeps(deps: Seq[PathRef], installRoot: os.Path): Unit =
+    deps.map(_.path).distinct.foreach { source =>
+      val name = unmanagedPackageName(source)
+      // A local package's own node_modules is development debris; bun resolves the package's
+      // declared dependencies through the lockfile instead.
+      copyTree(source, installRoot / "vendor" / vendorDirectoryName(name), exclude = Set("node_modules"))
+    }
+
   /** Add unmodeled package.json fields without allowing typed dependency data to be replaced. */
   def mergePackageJson(base: ujson.Obj, extras: ujson.Obj): ujson.Obj = {
     val conflicts = extras.value.keySet.intersect(ModeledPackageJsonFields).toSeq.sorted
