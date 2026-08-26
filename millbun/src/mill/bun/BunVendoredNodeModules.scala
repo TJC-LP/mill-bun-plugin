@@ -44,9 +44,19 @@ object BunVendoredNodeModules:
           FileVisitResult.CONTINUE
     )
 
-  /** Merge vendored node_modules from a classpath entry into a destination. */
+  /** Merge vendored node_modules from a classpath entry into a destination.
+    *
+    * Refuses a symlinked destination: in workspace mode `node_modules` is a link into the shared
+    * workspace install's `Task.dest`, and merging through it would silently mutate another task's
+    * output — shared by every other member of the workspace.
+    */
   def mergeFromClasspathEntry(entry: os.Path, destNodeModules: os.Path): Boolean =
-    if os.isDir(entry) then mergeFromDir(entry, destNodeModules, entry.toString)
+    if os.isLink(destNodeModules) then
+      throw new RuntimeException(
+        s"Refusing to merge vendored Bun runtime into $destNodeModules: it is a symlink to " +
+          s"${os.readLink.absolute(destNodeModules)}, which belongs to another task."
+      )
+    else if os.isDir(entry) then mergeFromDir(entry, destNodeModules, entry.toString)
     else if os.exists(entry) && entry.ext == "jar" then mergeFromJar(entry, destNodeModules)
     else false
 
