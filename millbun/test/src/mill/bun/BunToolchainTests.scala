@@ -126,6 +126,31 @@ object BunToolchainTests extends TestSuite:
       assert(BunToolchainModule.publishToCache(second, cached) == cached)
       assert(os.read(cached) == "bun-binary")
 
+    test("cross-filesystem publish preserves permissions and leaves no temp debris"):
+      val root = os.temp.dir()
+      val cached = root / "cache" / "def456" / "bun"
+      val staged = root / "staged" / "bun"
+      os.write(staged, "bun-binary", createFolders = true)
+      os.perms.set(staged, "rwxr-xr-x")
+
+      assert(BunToolchainModule.publishViaCopy(staged, cached) == cached)
+      assert(os.read(cached) == "bun-binary")
+      assert(os.perms(cached).toString == "rwxr-xr-x")
+      // The bytes must travel under a temp name and arrive by rename: a crash mid-publish can
+      // never leave a partial file at the published path, and success leaves nothing behind.
+      assert(os.list(cached / os.up) == Seq(cached))
+
+    test("cross-filesystem publish tolerates losing the race"):
+      val root = os.temp.dir()
+      val cached = root / "cache" / "0123" / "bun"
+      os.write(cached, "bun-binary", createFolders = true)
+      val staged = root / "staged" / "bun"
+      os.write(staged, "bun-binary", createFolders = true)
+
+      assert(BunToolchainModule.publishViaCopy(staged, cached) == cached)
+      assert(os.read(cached) == "bun-binary")
+      assert(os.list(cached / os.up) == Seq(cached))
+
     test("computes SHA-256"):
       val file = os.temp(contents = "hello")
       assert(

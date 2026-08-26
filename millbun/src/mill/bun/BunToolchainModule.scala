@@ -206,12 +206,45 @@ object BunToolchainModule {
       )
       cached
     catch
-      case _: java.nio.file.FileAlreadyExistsException => cached
-      case _: java.nio.file.AtomicMoveNotSupportedException =>
-        // Cache on a different filesystem than the task dest: fall back to a plain copy.
-        os.copy.over(staged, cached, createFolders = true)
+      case _: java.nio.file.AtomicMoveNotSupportedException => publishViaCopy(staged, cached)
+      case scala.util.control.NonFatal(_) if os.exists(cached) =>
+        // Lost the publish race. The path is keyed by the verified checksum, so the winner's
+        // bytes are the right bytes. Windows reports this as a sharing violation rather than
+        // FileAlreadyExistsException, so match on the outcome, not the exception type.
         cached
   }
+
+  /**
+   * Publish across filesystems by staging a copy next to the final path, so the last hop is a
+   * same-filesystem atomic rename. Copying straight to the published name would let a concurrent
+   * reader execute a partially written binary — and a build killed mid-copy would leave a
+   * truncated file that every later build trusts, because the path is the checksum.
+   */
+  private[bun] def publishViaCopy(staged: os.Path, cached: os.Path): os.Path = {
+    val tmp = cached / os.up /
+      s"${cached.last}.tmp-${ProcessHandle.current().pid()}-${System.nanoTime()}"
+    os.copy(staged, tmp, copyAttributes = true, createFolders = true)
+    try
+      java.nio.file.Files.move(
+        tmp.toNIO,
+        cached.toNIO,
+        java.nio.file.StandardCopyOption.ATOMIC_MOVE
+      )
+    catch
+      case scala.util.control.NonFatal(_) if os.exists(cached) => os.remove.all(tmp)
+    cached
+  }
+
+  /**
+   * A `PathRef` into the shared download cache.
+   *
+   * The file lives outside every `Task.dest`, so Mill must re-check it each evaluation: entries
+   * are immutable but evictable, and without revalidation an evicted executable is never
+   * re-downloaded — every bun invocation fails until the user guesses the right `clean`. Quick
+   * (mtime + size) signatures keep the per-evaluation cost to a stat.
+   */
+  private[bun] def cachedExecutableRef(cached: os.Path): PathRef =
+    PathRef(cached, quick = true).withRevalidate(PathRef.Revalidate.Always)
 
   /** Parse package.json-style `name@specifier` declarations without slicing scoped names incorrectly. */
   private[bun] def parseDependency(input: String): Either[String, NpmDependency] = {
@@ -323,7 +356,10 @@ object BunToolchainModule {
       if (os.isLink(path)) {
         os.makeDir.all(target / os.up)
         if (os.exists(target, followLinks = false)) os.remove(target)
-        os.symlink(target, os.readLink.absolute(path))
+        // Preserve the raw target: absolutizing a tree-internal relative link (bun's
+        // node_modules/.bin entries) would point the copy back into the source tree, so the
+        // copy stops being self-contained the moment the source is cleaned or relocated.
+        os.symlink(target, os.readLink(path))
       } else if (os.isDir(path, followLinks = false)) {
         os.makeDir.all(target)
       } else {
@@ -416,7 +452,8 @@ trait BunToolchainModule extends Module {
    * Lives outside the workspace, so Mill's filesystem checker does not restrict it.
    */
   def bunDownloadCacheDir: T[os.Path] = Task.Input {
-    Task.env.get("MILL_BUN_CACHE_DIR").filter(_.nonEmpty).map(os.Path(_))
+    Task.env.get("MILL_BUN_CACHE_DIR").filter(_.nonEmpty)
+      .map(os.Path(_, BuildCtx.workspaceRoot))
       .getOrElse(os.home / ".cache" / "mill-bun")
   }
 
@@ -560,7 +597,7 @@ trait BunToolchainModule extends Module {
 
     // Keyed by the verified checksum, so a cache hit is proof of the right bytes.
     val cached = bunDownloadCacheDir() / checksum / dist.executableName
-    if (os.exists(cached)) PathRef(cached)
+    if (os.exists(cached)) BunToolchainModule.cachedExecutableRef(cached)
     else {
       val archive = Task.dest / dist.assetName
       val staged = Task.dest / dist.executableName
@@ -570,7 +607,7 @@ trait BunToolchainModule extends Module {
         Task.fail(s"Bun archive checksum mismatch for $url: expected $checksum, received $actual")
       }
       BunToolchainModule.extractExecutable(archive, dist.executableName, staged)
-      PathRef(BunToolchainModule.publishToCache(staged, cached))
+      BunToolchainModule.cachedExecutableRef(BunToolchainModule.publishToCache(staged, cached))
     }
   }
 
