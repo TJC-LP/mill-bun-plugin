@@ -27,6 +27,14 @@ object BunDependencyManifestIntegrationTests extends TestSuite {
       assert(!res.isSuccess)
     }
 
+    test("invalid bun specifier fails in build definitions") {
+      // The macro only checked the package-name half, so bun"react@" compiled cleanly and then
+      // threw from parseDependency during the install — defeating the interpolator's purpose.
+      val tester = this.tester("invalid-bun-specifier")
+      val res = tester.eval("app.bunDeps")
+      assert(!res.isSuccess)
+    }
+
     test("published dev-only modules do not emit runtime manifests") {
       val tester = this.tester("scalajs-dependency-manifests")
       val res = tester.eval("publishedDevOnlyLib.jar")
