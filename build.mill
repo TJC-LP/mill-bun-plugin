@@ -37,9 +37,11 @@ object millbun extends ScalaModule, PublishModule {
       Map(
         "MILL_EXECUTABLE_PATH" -> millScript.toString,
         "COURSIER_REPOSITORIES" -> repos.mkString("|"),
-        // Existing fixtures exercise installed Bun behavior. Dedicated tests cover
-        // managed resolution and strict lockfile failures.
-        "MILL_BUN_USE_SYSTEM" -> Task.env.getOrElse("MILL_BUN_USE_SYSTEM", "true"),
+        // Default to the managed toolchain, so the suite exercises the same Bun the plugin
+        // pins rather than whatever the developer happens to have on PATH. The shared
+        // download cache means all fixtures reuse one archive. Export MILL_BUN_USE_SYSTEM=true
+        // to run against a local Bun instead.
+        "MILL_BUN_USE_SYSTEM" -> Task.env.getOrElse("MILL_BUN_USE_SYSTEM", "false"),
         "MILL_BUN_REQUIRE_LOCKFILE" -> Task.env.getOrElse("MILL_BUN_REQUIRE_LOCKFILE", "false")
       )
     }

@@ -107,7 +107,8 @@ object BunTypeScriptIntegrationTests extends TestSuite {
       val packageJson = ujson.read(os.read(tester.workspacePath / "out" / "app" / "npmInstall.dest" / "package.json"))
       val devDeps = packageJson("devDependencies").obj
 
-      assert(devDeps("@types/bun").str == "1.3.11")
+      // Pinned, and pinned to the Bun we ship: @types/bun is published in lockstep with Bun.
+      assert(devDeps("@types/bun").str == BunToolchainModule.DefaultBunVersion)
       assert(devDeps("@types/bun").str != "latest")
       assert(!devDeps.contains("@types/node"))
     }

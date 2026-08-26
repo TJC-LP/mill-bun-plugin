@@ -61,8 +61,12 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
   /** Node ambient types used for node-targeted Bun builds. */
   def nodeTypesVersion: T[String] = Task { "22.10.9" }
 
-  /** Bun ambient types used for bun-targeted Bun builds. */
-  def bunTypesVersion: T[String] = Task { "1.3.11" }
+  /** Bun ambient types used for bun-targeted Bun builds.
+    *
+    * `@types/bun` is published in lockstep with Bun itself, so this tracks [[bunVersion]] by
+    * default and the two cannot drift.
+    */
+  def bunTypesVersion: T[String] = Task { bunVersion() }
 
   /** Ambient runtime types aligned to the configured Bun target. */
   protected def ambientTypeDeps: T[Seq[String]] = Task {

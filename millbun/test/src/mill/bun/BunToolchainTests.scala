@@ -27,19 +27,104 @@ object BunToolchainTests extends TestSuite:
       assert(BunToolchainModule.distribution("Plan 9", "x64").isLeft)
       assert(BunToolchainModule.distribution("Linux", "riscv64").isLeft)
 
-    test("bundles checksums for every supported Bun 1.3.14 asset"):
-      val assets = Seq(
-        "bun-darwin-aarch64.zip",
-        "bun-darwin-x64.zip",
-        "bun-linux-aarch64.zip",
-        "bun-linux-x64.zip",
-        "bun-windows-aarch64.zip",
-        "bun-windows-x64.zip"
+    test("composes musl and baseline asset names"):
+      assert(
+        BunToolchainModule.distribution("Linux", "x64", musl = true) == Right(
+          BunToolchainModule.Distribution("bun-linux-x64-musl.zip", "bun")
+        )
       )
-      assets.foreach: asset =>
-        val checksum = BunToolchainModule.bundledChecksum("1.3.14", asset)
+      assert(
+        BunToolchainModule.distribution("Linux", "x64", baseline = true) == Right(
+          BunToolchainModule.Distribution("bun-linux-x64-baseline.zip", "bun")
+        )
+      )
+      assert(
+        BunToolchainModule.distribution("Linux", "x64", musl = true, baseline = true) == Right(
+          BunToolchainModule.Distribution("bun-linux-x64-musl-baseline.zip", "bun")
+        )
+      )
+      assert(
+        BunToolchainModule.distribution("Windows 11", "x64", baseline = true) == Right(
+          BunToolchainModule.Distribution("bun-windows-x64-baseline.zip", "bun.exe")
+        )
+      )
+
+    test("rejects modifier combinations Bun does not publish"):
+      // musl is Linux-only, baseline is x64-only.
+      assert(BunToolchainModule.distribution("Mac OS X", "x64", musl = true).isLeft)
+      assert(BunToolchainModule.distribution("Windows 11", "x64", musl = true).isLeft)
+      assert(BunToolchainModule.distribution("Linux", "aarch64", baseline = true).isLeft)
+      assert(BunToolchainModule.distribution("Mac OS X", "aarch64", baseline = true).isLeft)
+
+    test("bundles a checksum for every asset of every pinned version"):
+      // Every combination distribution() can produce must be downloadable, or the managed
+      // toolchain fails on a platform we claim to support.
+      val platforms = Seq(
+        ("Mac OS X", "aarch64"),
+        ("Mac OS X", "x64"),
+        ("Linux", "aarch64"),
+        ("Linux", "x64"),
+        ("Windows 11", "aarch64"),
+        ("Windows 11", "x64")
+      )
+      val assets =
+        for
+          (os, arch) <- platforms
+          musl <- Seq(false, true)
+          baseline <- Seq(false, true)
+          dist <- BunToolchainModule.distribution(os, arch, musl, baseline).toOption
+        yield dist.assetName
+
+      assert(assets.distinct.size == 12)
+      for
+        version <- BunToolchainModule.bundledVersions
+        asset <- assets.distinct
+      do
+        val checksum = BunToolchainModule.bundledChecksum(version, asset)
         assert(checksum.exists(_.matches("[0-9a-f]{64}")))
-      assert(BunToolchainModule.bundledChecksum("1.3.15", assets.head).isEmpty)
+
+    test("pins the versions the docs and CI claim"):
+      assert(BunToolchainModule.bundledVersions == Seq("1.3.14", "1.4.0"))
+      // The default must be one we ship checksums for, or the managed path cannot work offline.
+      assert(BunToolchainModule.bundledVersions.contains(BunToolchainModule.DefaultBunVersion))
+
+    test("unknown versions have no bundled checksum"):
+      assert(BunToolchainModule.bundledChecksum("1.3.15", "bun-linux-x64.zip").isEmpty)
+
+    test("musl detection probes the loader and the alpine marker"):
+      val glibc = os.temp.dir()
+      os.makeDir.all(glibc / "lib")
+      os.write(glibc / "lib" / "ld-linux-x86-64.so.2", "")
+      assert(!BunToolchainModule.detectMusl(glibc))
+
+      val musl = os.temp.dir()
+      os.makeDir.all(musl / "lib")
+      os.write(musl / "lib" / "ld-musl-x86_64.so.1", "")
+      assert(BunToolchainModule.detectMusl(musl))
+
+      val alpine = os.temp.dir()
+      os.makeDir.all(alpine / "etc")
+      os.write(alpine / "etc" / "alpine-release", "3.20.0")
+      assert(BunToolchainModule.detectMusl(alpine))
+
+      assert(!BunToolchainModule.detectMusl(os.temp.dir()))
+
+    test("publishing to the download cache is idempotent under a race"):
+      val root = os.temp.dir()
+      val cached = root / "cache" / "abc123" / "bun"
+
+      val first = root / "first" / "bun"
+      os.write(first, "bun-binary", createFolders = true)
+      assert(BunToolchainModule.publishToCache(first, cached) == cached)
+      assert(os.read(cached) == "bun-binary")
+      assert(!os.exists(first))
+
+      // A second module extracting the same checksum concurrently must not fail, and must not
+      // clobber the entry another task may already be executing.
+      val second = root / "second" / "bun"
+      os.write(second, "bun-binary", createFolders = true)
+      assert(BunToolchainModule.publishToCache(second, cached) == cached)
+      assert(os.read(cached) == "bun-binary")
 
     test("computes SHA-256"):
       val file = os.temp(contents = "hello")

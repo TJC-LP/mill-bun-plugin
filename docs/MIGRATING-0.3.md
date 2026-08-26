@@ -44,7 +44,7 @@ The old names are planned for removal at 1.0.
 
 ## Toolchain behavior
 
-The default is now checksum-verified managed Bun 1.3.14. To preserve the old PATH behavior:
+The default is now checksum-verified managed Bun 1.4.0. To preserve the old PATH behavior:
 
 ```bash
 export MILL_BUN_USE_SYSTEM=true
