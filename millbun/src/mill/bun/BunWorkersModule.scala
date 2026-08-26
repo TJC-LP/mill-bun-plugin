@@ -59,6 +59,9 @@ trait BunWorkersModule extends BunToolchainModule { this: BunTypeScriptModule =>
   def bundleWorkers: T[PathRef] = Task {
     val workspace = Task.dest / "workspace"
     val outDir = Task.dest / "workers"
+    // Declared explicitly: the staged tree carries a node_modules symlink into this install,
+    // and Mill's filesystem checker only permits reading a dest we depend on.
+    npmInstall()
     BunToolchainModule.copyWorkspace(compile().path, workspace)
     os.makeDir.all(outDir)
 

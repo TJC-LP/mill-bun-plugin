@@ -83,6 +83,27 @@ object BunScalaJSIntegrationTests extends TestSuite {
       assert(files.exists(_.ext == "js"))
     }
 
+    test("web stage resolves npm dependencies") {
+      // The fixture imports lodash via @JSImport, so the linked output carries a real npm
+      // import that `bun build` has to resolve out of the staged directory. Staging used to
+      // flatten the install's node_modules symlink into an empty directory, which made every
+      // npm import unresolvable.
+      val tester = this.tester("scalajs-web")
+      assert(tester.eval("app.bundle").isSuccess)
+
+      val stage = tester.workspacePath / "out" / "app" / "webProductionStage.dest"
+      assert(os.isLink(stage / "node_modules"))
+      assert(os.exists(stage / "node_modules" / "lodash" / "package.json"))
+
+      // lodash must be inlined into the bundle, not left as a bare import.
+      val bundled = os.walk(outputPath(tester, "app.bundle"))
+        .filter(p => os.isFile(p) && p.ext == "js")
+        .map(os.read)
+        .mkString
+      assert(!bundled.contains("""from"lodash""""))
+      assert(!bundled.contains("""from "lodash""""))
+    }
+
     test("compileExecutable") {
       val tester = this.tester("scalajs-bundle")
       val res = tester.eval("app.compileExecutable")

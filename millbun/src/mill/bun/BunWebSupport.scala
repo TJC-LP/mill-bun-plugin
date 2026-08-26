@@ -13,32 +13,29 @@ private[mill] object BunWebSupport:
       copyPath(source, target)
     }
 
-  def copyContents(source: os.Path, destination: os.Path): Unit =
+  def copyContents(
+      source: os.Path,
+      destination: os.Path,
+      exclude: Set[String] = Set.empty
+  ): Unit =
     if os.exists(source) then
-      if os.isDir(source) then
-        os.walk(source).foreach { path =>
-          val relative = path.relativeTo(source)
-          if relative.segments.nonEmpty then
-            val target = destination / relative
-            if os.isDir(path) then os.makeDir.all(target)
-            else os.copy.over(path, target, createFolders = true)
-        }
+      if os.isDir(source) then BunToolchainModule.copyTree(source, destination, exclude)
       else copyPath(source, destination / source.last)
 
   private def copyPath(source: os.Path, target: os.Path): Unit =
-    if os.isDir(source) then
-      os.walk(source).foreach { path =>
-        val destination = target / path.relativeTo(source)
-        if os.isDir(path) then os.makeDir.all(destination)
-        else os.copy.over(path, destination, createFolders = true)
-      }
+    if os.isDir(source) then BunToolchainModule.copyTree(source, target)
     else os.copy.over(source, target, createFolders = true)
 
+  /**
+   * Resolve the HTML entrypoints a staged web build will use. Pure — writes nothing.
+   *
+   * Kept separate from [[materializeHtmlEntries]] so `dev()` and `bundle` can ask which entries
+   * exist without writing into the staging task's already-cached output directory.
+   */
   def htmlEntries(
       configured: Seq[PathRef],
       moduleDir: os.Path,
-      destination: os.Path,
-      generatedScript: String
+      destination: os.Path
   ): Seq[os.Path] =
     val copied = configured
       .map(_.path)
@@ -48,11 +45,20 @@ private[mill] object BunWebSupport:
         else destination / path.last
       )
 
-    if copied.nonEmpty then copied
-    else
-      val index = destination / "index.html"
+    if copied.nonEmpty then copied else Seq(destination / "index.html")
+
+  /** Resolve entrypoints, generating a minimal `index.html` when the module supplies none. */
+  def materializeHtmlEntries(
+      configured: Seq[PathRef],
+      moduleDir: os.Path,
+      destination: os.Path,
+      generatedScript: String
+  ): Seq[os.Path] =
+    val entries = htmlEntries(configured, moduleDir, destination)
+    val hasConfigured = configured.exists(ref => os.exists(ref.path) && os.isFile(ref.path))
+    if !hasConfigured then
       os.write.over(
-        index,
+        entries.head,
         s"""<!doctype html>
            |<html>
            |  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head>
@@ -61,7 +67,7 @@ private[mill] object BunWebSupport:
            |""".stripMargin,
         createFolders = true
       )
-      Seq(index)
+    entries
 
   def syncRoots(roots: Seq[(os.Path, os.Path)]): Unit =
     roots.foreach { case (source, target) =>

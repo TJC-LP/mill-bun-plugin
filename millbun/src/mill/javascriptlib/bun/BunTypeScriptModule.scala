@@ -284,6 +284,9 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
       if (bunCompileExecutable()) Task.dest / bunBinaryName()
       else Task.dest / s"$moduleName.js"
 
+    // Declared explicitly: the staged tree carries a node_modules symlink into this
+    // install, and Mill's filesystem checker only permits reading a dest we depend on.
+    npmInstall()
     BunToolchainModule.copyWorkspace(compileDir, buildDir)
     BunTypeScriptModule.removeInstallOnlyConfigs(buildDir)
     BunTypeScriptModule.copyBunfigsTo(buildDir, resolvedBunfigs())
@@ -319,6 +322,9 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
     val mainFile = resolvedEntrypoint(mainFilePath(), compileDir).relativeTo(compileDir).toString
     val outFile = Task.dest / bunBinaryName()
 
+    // Declared explicitly: the staged tree carries a node_modules symlink into this
+    // install, and Mill's filesystem checker only permits reading a dest we depend on.
+    npmInstall()
     BunToolchainModule.copyWorkspace(compileDir, buildDir)
     BunTypeScriptModule.removeInstallOnlyConfigs(buildDir)
     BunTypeScriptModule.copyBunfigsTo(buildDir, resolvedBunfigs())
@@ -356,6 +362,9 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
     val compileDir = compile().path
     val buildDir = Task.dest / "workspace"
     val mainFile = resolvedEntrypoint(mainFilePath(), compileDir).relativeTo(compileDir).toString
+    // Declared explicitly: the staged tree carries a node_modules symlink into this
+    // install, and Mill's filesystem checker only permits reading a dest we depend on.
+    npmInstall()
     BunToolchainModule.copyWorkspace(compileDir, buildDir)
     BunTypeScriptModule.removeInstallOnlyConfigs(buildDir)
     BunTypeScriptModule.copyBunfigsTo(buildDir, resolvedBunfigs())

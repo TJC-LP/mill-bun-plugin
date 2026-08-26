@@ -299,11 +299,41 @@ object BunToolchainModule {
       .find(path => os.isFile(path) && java.nio.file.Files.isExecutable(path.toNIO))
   }
 
-  /** Copy a generated workspace into a fresh task destination, preserving layout. */
-  def copyWorkspace(source: os.Path, dest: os.Path): Unit = {
-    os.walk(source)
-      .foreach(path => os.copy.over(path, dest / path.relativeTo(source), createFolders = true))
+  /**
+   * Copy a directory tree, recreating symlinks instead of resolving them.
+   *
+   * `os.walk` does not follow links, but `os.isDir` and `os.copy` do. Branching on one while
+   * copying with the other means a `node_modules` symlink is either deep-copied (turning an O(1)
+   * link into an O(node_modules) copy) or flattened into an empty directory, and a broken link
+   * anywhere in the tree — routine for the `.bin` shims of skipped optional dependencies — aborts
+   * the whole copy. Recreating the link is both correct and cheap.
+   *
+   * @param exclude top-level entry names to skip entirely
+   */
+  def copyTree(source: os.Path, dest: os.Path, exclude: Set[String] = Set.empty): Unit = {
+    if (!os.exists(source, followLinks = false)) return
+
+    val skip = (path: os.Path) => {
+      val relative = path.relativeTo(source)
+      relative.segments.headOption.exists(exclude.contains)
+    }
+
+    os.walk(source, skip = skip, followLinks = false).foreach { path =>
+      val target = dest / path.relativeTo(source)
+      if (os.isLink(path)) {
+        os.makeDir.all(target / os.up)
+        if (os.exists(target, followLinks = false)) os.remove(target)
+        os.symlink(target, os.readLink.absolute(path))
+      } else if (os.isDir(path, followLinks = false)) {
+        os.makeDir.all(target)
+      } else {
+        os.copy.over(path, target, createFolders = true)
+      }
+    }
   }
+
+  /** Copy a generated workspace into a fresh task destination, preserving layout and symlinks. */
+  def copyWorkspace(source: os.Path, dest: os.Path): Unit = copyTree(source, dest)
 
   /**
    * Copy files or directories into a Bun workspace while preserving their relative path
@@ -322,13 +352,8 @@ object BunToolchainModule {
           .map(root => destRoot / source.relativeTo(root))
           .getOrElse(destRoot / source.last)
 
-      if (os.isDir(source)) {
-        os.walk(source).foreach { path =>
-          os.copy.over(path, target / path.relativeTo(source), createFolders = true)
-        }
-      } else {
-        os.copy.over(source, target, createFolders = true)
-      }
+      if (os.isDir(source)) copyTree(source, target)
+      else os.copy.over(source, target, createFolders = true)
     }
   }
 }
