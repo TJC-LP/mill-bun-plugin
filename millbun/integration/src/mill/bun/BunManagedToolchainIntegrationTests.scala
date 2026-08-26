@@ -19,4 +19,4 @@ object BunManagedToolchainIntegrationTests extends TestSuite:
       assert(result.isSuccess)
       val executable = tester.out("app.bunExecutable").value[String]
       val version = os.proc(executable, "--version").call(stdout = os.Pipe).out.text().trim
-      assert(version == "1.3.14")
+      assert(version == "1.4.0")

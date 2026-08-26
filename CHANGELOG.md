@@ -11,7 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Tag-driven release workflow for Maven Central publishing and GitHub releases.
 - Release runbook covering secrets, version sweep, annotated tags, and verification.
-- Checksum-verified managed Bun 1.3.14 for macOS, Linux, and Windows on x64 and arm64.
+- Checksum-verified managed Bun 1.4.0 for macOS, Linux, and Windows on x64 and arm64, including
+  musl (auto-detected) and `-baseline` (via `bunUseBaseline`) builds.
+- `bunArchiveSha256` may be set on its own to run a Bun version with no bundled checksum; the
+  download URL is derived from `bunVersion` and the detected platform.
 - Strict text-lockfile workflow with `bunLock`, frozen installs, and actionable missing-lock failures.
 - Canonical `bundle`, `bundleFast`, `compileExecutable`, and `compileExecutables` task names.
 - Paired `BunScalaJSWebModule` and `BunTypeScriptWebModule` HTML workflows.

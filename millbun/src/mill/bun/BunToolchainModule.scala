@@ -10,6 +10,14 @@ import java.util.zip.ZipInputStream
 
 object BunToolchainModule {
 
+  /**
+   * The Bun release this plugin is tested against and downloads by default.
+   *
+   * Referenced by `bunVersion`, by `bunTypesVersion` (`@types/bun` is published in lockstep), and
+   * by the tests, so a bump is a one-line change here rather than a hunt for literals.
+   */
+  val DefaultBunVersion = "1.4.0"
+
   private val ModeledPackageJsonFields = Set(
     "dependencies",
     "devDependencies",
@@ -26,39 +34,102 @@ object BunToolchainModule {
       executableName: String
   )
 
-  private val Bun1314Checksums = Map(
-    "bun-darwin-aarch64.zip" -> "d8b96221828ad6f97ac7ac0ab7e95872341af763001e8803e8267652c2652620",
-    "bun-darwin-x64.zip" -> "4183df3374623e5bab315c547cfa0974533cd457d86b73b639f7a87974cd6633",
-    "bun-linux-aarch64.zip" -> "a27ffb63a8310375836e0d6f668ae17fa8d8d18b88c37c821c65331973a19a3b",
-    "bun-linux-x64.zip" -> "951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f",
-    "bun-windows-aarch64.zip" -> "89841f5a57f2348b67ec0839b718f4bf4ea7d07c371c9ba4b77b6c790f918953",
-    "bun-windows-x64.zip" -> "0a0620930b6675d7ba440e81f4e0e00d3cfbe096c4b140d3fff02205e9e18922"
+  /**
+   * SHA-256 for every Bun release asset this plugin can download, keyed by version then asset.
+   *
+   * Sourced from the `SHASUMS256.txt` published with each Bun release. To add a version, append a
+   * complete entry — [[bundledChecksum]] deliberately has no fallback, so a partial table fails
+   * loudly on the missing platform rather than silently skipping verification.
+   */
+  private val BundledChecksums: Map[String, Map[String, String]] = Map(
+    "1.3.14" -> Map(
+      "bun-darwin-aarch64.zip" -> "d8b96221828ad6f97ac7ac0ab7e95872341af763001e8803e8267652c2652620",
+      "bun-darwin-x64.zip" -> "4183df3374623e5bab315c547cfa0974533cd457d86b73b639f7a87974cd6633",
+      "bun-darwin-x64-baseline.zip" -> "3e35ad6f53971a9834bf9e6786e2adf72b5f1921cc9a9c5fde073d2972944076",
+      "bun-linux-aarch64.zip" -> "a27ffb63a8310375836e0d6f668ae17fa8d8d18b88c37c821c65331973a19a3b",
+      "bun-linux-aarch64-musl.zip" -> "b98e0ad3625c5c00d1d5b5ff55605c7adddbfae151861e68ade57b2d3b8703bb",
+      "bun-linux-x64.zip" -> "951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f",
+      "bun-linux-x64-baseline.zip" -> "a063908ae08b7852ca10939bbdc6ceed3ddabce8fb9402dce83d65d73b36e6c7",
+      "bun-linux-x64-musl.zip" -> "14bd9aedeebf1dba67e8def9531c89bc989ecfdf1de42e5bfcaf1b8cd9294719",
+      "bun-linux-x64-musl-baseline.zip" -> "56a7d6806cf155536c0178f0ea5fbd098e684fa509ebdb4fc0a7e19fb65382dc",
+      "bun-windows-aarch64.zip" -> "89841f5a57f2348b67ec0839b718f4bf4ea7d07c371c9ba4b77b6c790f918953",
+      "bun-windows-x64.zip" -> "0a0620930b6675d7ba440e81f4e0e00d3cfbe096c4b140d3fff02205e9e18922",
+      "bun-windows-x64-baseline.zip" -> "538f9c846355d9e847b2671bc00c47da4229a0befb24df3282b739770f3b475f"
+    ),
+    "1.4.0" -> Map(
+      "bun-darwin-aarch64.zip" -> "c669e97f6164e1c96e0701748db98dfa77492908cbd8394c7557134a735de381",
+      "bun-darwin-x64.zip" -> "1d0211b8f1dc991182344687ad15e72ee86f154845a5f7fa477994cd341dd9b0",
+      "bun-darwin-x64-baseline.zip" -> "da9b9f1b4ba766c6f299711f38dfaa98623e1ed9c40896aa53db803c52ec1fa0",
+      "bun-linux-aarch64.zip" -> "4b1a332ee861983eb93bcfe6f770fff94e3e31b2c388bdaea3c8ed35e58eed0e",
+      "bun-linux-aarch64-musl.zip" -> "576300ce33ff16ffcd455bf178c2f095f9df845c6cc3d0284ba1c96ca0e80473",
+      "bun-linux-x64.zip" -> "2d03fb5fb83ac8b567aca0a281b2ce1a1a19d488f56c2968d88c3f25e92fe452",
+      "bun-linux-x64-baseline.zip" -> "184fb4595f0d401a217cf7c78c1bc430ba83314dab7a8b94805babbf7fa7097f",
+      "bun-linux-x64-musl.zip" -> "83b5f12fd258dd8d4fdcaea65ede954366aa717dab399e20093ecab280d54e7a",
+      "bun-linux-x64-musl-baseline.zip" -> "618c4bc1f94b02337ee210003c0b7c066f11548a8cdc5109df10db043dc47ca2",
+      "bun-windows-aarch64.zip" -> "f473bfe2df73ee770548c93dd5d380aea7120c218ec2aa1afdd0bbba7bf18c47",
+      "bun-windows-x64.zip" -> "e6f093d39da486b20262ca8cdd5ed6a9e8bc9c2f275b78e6d3a0c5b28cc95901",
+      "bun-windows-x64-baseline.zip" -> "b929c54a9badb104a16dedd23aab6152c86793ae653d4e6b13983ffd0c882a66"
+    )
   )
 
-  private[bun] def distribution(osName: String, architecture: String): Either[String, Distribution] = {
+  /** Versions with a complete bundled checksum table, for diagnostics. */
+  private[bun] def bundledVersions: Seq[String] = BundledChecksums.keys.toSeq.sorted
+
+  /**
+   * Compose a Bun release asset name from the platform axes.
+   *
+   * Bun names assets `bun-{os}-{arch}[-musl][-baseline].zip`. The two modifiers are constrained:
+   * `-musl` exists only for Linux, and `-baseline` (for x64 CPUs without AVX2) only for x64. This
+   * returns `Left` for combinations Bun does not publish rather than constructing a 404 URL.
+   */
+  private[bun] def distribution(
+      osName: String,
+      architecture: String,
+      musl: Boolean = false,
+      baseline: Boolean = false
+  ): Either[String, Distribution] = {
     val osPart = osName.toLowerCase match {
       case name if name.contains("mac") || name.contains("darwin") => Right("darwin")
-      case name if name.contains("linux")                           => Right("linux")
+      case name if name.contains("linux")                          => Right("linux")
       case name if name.contains("windows")                        => Right("windows")
       case other => Left(s"Unsupported operating system '$other'")
     }
     val archPart = architecture.toLowerCase match {
-      case "aarch64" | "arm64" => Right("aarch64")
+      case "aarch64" | "arm64"        => Right("aarch64")
       case "amd64" | "x86_64" | "x64" => Right("x64")
-      case other => Left(s"Unsupported architecture '$other'")
+      case other                      => Left(s"Unsupported architecture '$other'")
     }
 
     for {
       os <- osPart
       arch <- archPart
+      _ <-
+        if (musl && os != "linux") Left(s"Bun publishes no musl build for '$os'")
+        else Right(())
+      _ <-
+        if (baseline && arch != "x64") Left(s"Bun publishes no baseline build for '$arch'")
+        else Right(())
     } yield Distribution(
-      assetName = s"bun-$os-$arch.zip",
+      assetName = s"bun-$os-$arch${if (musl) "-musl" else ""}${if (baseline) "-baseline" else ""}.zip",
       executableName = if (os == "windows") "bun.exe" else "bun"
     )
   }
 
+  /**
+   * Detect a musl-based Linux (Alpine and friends), where the glibc build cannot run.
+   *
+   * Probing for the musl dynamic loader is more reliable than parsing `ldd --version`, which musl
+   * writes to stderr and glibc to stdout.
+   */
+  private[bun] def detectMusl(root: os.Path = os.root): Boolean =
+    try
+      val libDir = root / "lib"
+      (os.exists(libDir) && os.list(libDir).exists(p => p.last.startsWith("ld-musl-"))) ||
+      os.exists(root / "etc" / "alpine-release")
+    catch case _: Exception => false
+
   private[bun] def bundledChecksum(version: String, assetName: String): Option[String] =
-    if (version == "1.3.14") Bun1314Checksums.get(assetName) else None
+    BundledChecksums.get(version).flatMap(_.get(assetName))
 
   private[bun] def sha256(path: os.Path): String = {
     val digest = MessageDigest.getInstance("SHA-256")
@@ -116,6 +187,30 @@ object BunToolchainModule {
     if (executableName != "bun.exe" && !destination.toIO.setExecutable(true)) {
       throw new RuntimeException(s"Unable to make downloaded Bun executable: $destination")
     }
+  }
+
+  /**
+   * Move a verified executable into the shared cache, tolerating a concurrent writer.
+   *
+   * Mill evaluates modules in parallel, so two tasks can extract the same archive at once. Both
+   * move into the same destination; whoever loses the race simply uses the winner's file, which is
+   * byte-identical because the path is keyed by checksum.
+   */
+  private[bun] def publishToCache(staged: os.Path, cached: os.Path): os.Path = {
+    os.makeDir.all(cached / os.up)
+    try
+      java.nio.file.Files.move(
+        staged.toNIO,
+        cached.toNIO,
+        java.nio.file.StandardCopyOption.ATOMIC_MOVE
+      )
+      cached
+    catch
+      case _: java.nio.file.FileAlreadyExistsException => cached
+      case _: java.nio.file.AtomicMoveNotSupportedException =>
+        // Cache on a different filesystem than the task dest: fall back to a plain copy.
+        os.copy.over(staged, cached, createFolders = true)
+        cached
   }
 
   /** Parse package.json-style `name@specifier` declarations without slicing scoped names incorrectly. */
@@ -241,7 +336,23 @@ object BunToolchainModule {
 trait BunToolchainModule extends Module {
 
   /** Tested Bun release downloaded by default when no override is configured. */
-  def bunVersion: T[String] = Task { "1.3.14" }
+  def bunVersion: T[String] = Task { BunToolchainModule.DefaultBunVersion }
+
+  /**
+   * Download the `-baseline` build, for x64 CPUs without AVX2.
+   *
+   * Not auto-detected: the JVM cannot see CPU feature flags, and guessing wrong surfaces as an
+   * illegal-instruction crash rather than a diagnosable error. Set this when Bun aborts on startup
+   * with `SIGILL` on older x64 hardware.
+   */
+  def bunUseBaseline: T[Boolean] = Task { false }
+
+  /**
+   * Download the musl build, required on Alpine and other musl-based Linux distributions.
+   *
+   * Auto-detected from the presence of the musl dynamic loader; override to force either build.
+   */
+  def bunUseMusl: T[Boolean] = Task.Input { BunToolchainModule.detectMusl() }
 
   /** Resolve Bun from PATH instead of using the managed distribution. */
   def bunUseSystem: T[Boolean] = Task {
@@ -261,8 +372,28 @@ trait BunToolchainModule extends Module {
   /** Optional managed distribution mirror. Must be paired with [[bunArchiveSha256]]. */
   def bunArchiveUrl: T[Option[String]] = Task { None }
 
-  /** SHA-256 for [[bunArchiveUrl]], or for an unbundled Bun version. */
+  /**
+   * SHA-256 of the Bun archive to download.
+   *
+   * Set this alone to run a [[bunVersion]] with no bundled checksum — the URL is derived from the
+   * version and the detected platform. Set it together with [[bunArchiveUrl]] to use a mirror.
+   */
   def bunArchiveSha256: T[Option[String]] = Task { None }
+
+  /**
+   * Directory holding managed Bun downloads, shared by every module in the build.
+   *
+   * `downloadedBunExecutable` is a task on this trait, so without a shared cache a build with N
+   * Bun modules downloads the ~35 MB archive N times into N separate `Task.dest` directories.
+   * Entries are keyed by the archive's verified SHA-256, so a partial or tampered download can
+   * never be reused and two modules on the same pin share one file.
+   *
+   * Lives outside the workspace, so Mill's filesystem checker does not restrict it.
+   */
+  def bunDownloadCacheDir: T[os.Path] = Task.Input {
+    Task.env.get("MILL_BUN_CACHE_DIR").filter(_.nonEmpty).map(os.Path(_))
+      .getOrElse(os.home / ".cache" / "mill-bun")
+  }
 
   /** Verify that an override/system executable matches [[bunVersion]]. */
   def bunVerifyVersion: T[Boolean] = Task { true }
@@ -369,15 +500,17 @@ trait BunToolchainModule extends Module {
     val version = bunVersion()
     val dist = BunToolchainModule.distribution(
       System.getProperty("os.name", "unknown"),
-      System.getProperty("os.arch", "unknown")
+      System.getProperty("os.arch", "unknown"),
+      musl = bunUseMusl(),
+      baseline = bunUseBaseline()
     ).fold(
       message => Task.fail(s"$message. Set bunExecutableOverride or bunUseSystem."),
       identity
     )
     val customUrl = bunArchiveUrl()
     val customChecksum = bunArchiveSha256()
-    if (customUrl.isDefined != customChecksum.isDefined) {
-      Task.fail("bunArchiveUrl and bunArchiveSha256 must be configured together.")
+    if (customUrl.isDefined && customChecksum.isEmpty) {
+      Task.fail("bunArchiveUrl requires bunArchiveSha256 so the mirrored archive stays verified.")
     }
     val url = customUrl.getOrElse(
       s"https://github.com/oven-sh/bun/releases/download/bun-v$version/${dist.assetName}"
@@ -385,19 +518,30 @@ trait BunToolchainModule extends Module {
     val checksum = customChecksum
       .orElse(BunToolchainModule.bundledChecksum(version, dist.assetName))
       .getOrElse(Task.fail(
-        s"No bundled checksum for Bun $version (${dist.assetName}). Set bunArchiveUrl and bunArchiveSha256."
+        s"No bundled checksum for Bun $version (${dist.assetName}). " +
+          s"Bundled versions are ${BunToolchainModule.bundledVersions.mkString(", ")}. " +
+          "Set bunArchiveSha256 to the archive's SHA-256 to use this version anyway."
       ))
       .toLowerCase
 
-    val archive = Task.dest / dist.assetName
-    val executable = Task.dest / dist.executableName
-    BunToolchainModule.download(url, archive)
-    val actual = BunToolchainModule.sha256(archive)
-    if (actual != checksum) {
-      Task.fail(s"Bun archive checksum mismatch for $url: expected $checksum, received $actual")
+    if (!checksum.matches("[0-9a-f]{64}")) {
+      Task.fail(s"bunArchiveSha256 must be 64 hexadecimal characters, received '$checksum'.")
     }
-    BunToolchainModule.extractExecutable(archive, dist.executableName, executable)
-    PathRef(executable)
+
+    // Keyed by the verified checksum, so a cache hit is proof of the right bytes.
+    val cached = bunDownloadCacheDir() / checksum / dist.executableName
+    if (os.exists(cached)) PathRef(cached)
+    else {
+      val archive = Task.dest / dist.assetName
+      val staged = Task.dest / dist.executableName
+      BunToolchainModule.download(url, archive)
+      val actual = BunToolchainModule.sha256(archive)
+      if (actual != checksum) {
+        Task.fail(s"Bun archive checksum mismatch for $url: expected $checksum, received $actual")
+      }
+      BunToolchainModule.extractExecutable(archive, dist.executableName, staged)
+      PathRef(BunToolchainModule.publishToCache(staged, cached))
+    }
   }
 
   private def verifyBunVersion(executable: String, expected: String, verify: Boolean): Unit = {
@@ -451,6 +595,18 @@ trait BunToolchainModule extends Module {
     println(s"Bun version: ${bunVersion()}")
     if (revision.nonEmpty) println(s"Bun revision: $revision")
     println(s"Bun linker: ${bunLinker()}")
+    if (mode == "managed") {
+      val dist = BunToolchainModule.distribution(
+        System.getProperty("os.name", "unknown"),
+        System.getProperty("os.arch", "unknown"),
+        musl = bunUseMusl(),
+        baseline = bunUseBaseline()
+      )
+      println(s"Bun asset: ${dist.fold(identity, _.assetName)}")
+      println(s"Bun libc: ${if (bunUseMusl()) "musl" else "glibc"}")
+      println(s"Bun baseline: ${bunUseBaseline()}")
+    }
+    println(s"Bun lockfile: ${bunLockfile().fold("none")(_.path.toString)}")
   }
 
   /** Run a Bun command. All task values must be resolved before calling this. */
