@@ -29,6 +29,25 @@ Subsequent installs are frozen. During a staged migration only, set `MILL_BUN_RE
 
 Use `npmDeps`, `npmDevDeps`, `npmOptionalDeps`, `npmPeerDeps`, and `npmOverrides`. `bunPackageJsonExtras` remains available for unmodeled fields such as `scripts`, but now rejects dependency sections so task invalidation and published metadata remain correct.
 
+### `bunBundleFormat` is `Option[String]` on TypeScript modules
+
+Scala.js and TypeScript previously disagreed on this member's type — `Option[String]` versus
+`String` — which no deprecation alias can bridge, so 0.3 takes the one-time break. Both are now
+`T[Option[String]]`; `None` lets `bun build` infer the format.
+
+```scala
+// 0.2
+override def bunBundleFormat = Task { "esm" }
+// 0.3
+override def bunBundleFormat = Task { Some("esm") }
+```
+
+### Local packages via `unmanagedDeps` must be directories with a `package.json`
+
+Entries are staged into `vendor/` beside the generated package.json and declared as
+`file:./vendor/<name>` dependencies, so they now work under frozen lockfile installs and the
+lockfile stays independent of the checkout path. Tarballs are no longer accepted — unpack them.
+
 ## Renamed APIs
 
 | 0.2 name | 0.3 name | Status |
@@ -39,8 +58,16 @@ Use `npmDeps`, `npmDevDeps`, `npmOptionalDeps`, `npmPeerDeps`, and `npmOverrides
 | `bunCompileExecutables` | `compileExecutables` | Compatibility alias retained |
 | `bunOptionalDeps` | `npmOptionalDeps` | Deprecated compatibility setting |
 | `managedBunExecutable` | `bunExecutableOverride` | Deprecated compatibility setting |
+| `npmInstall` (TypeScript) | `bunInstall` | Mill's inherited name delegates to `bunInstall` and stays usable |
+| `test` (TypeScript test modules) | `testForked` | Deprecated compatibility command |
+| `bunTest` (Scala.js test modules) | `testForked` (inherited from Mill) | Deprecated compatibility command |
 
 The old names are planned for removal at 1.0.
+
+Environment hooks share one vocabulary: `bunToolEnv` (toolchain subprocesses — install, lock,
+build) is defined on `BunToolchainModule` for every module kind, and the TypeScript
+`bunRuntimeEnv` (program and test processes) is now public. Scala.js keeps `bunJsEnv` /
+`bunJsEnvArgs` / `bunTestJsEnv` for its Scala.js-test JS environment, unchanged.
 
 ## Toolchain behavior
 

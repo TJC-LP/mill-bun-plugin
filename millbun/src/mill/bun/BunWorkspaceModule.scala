@@ -127,7 +127,7 @@ trait BunWorkspaceModule extends BunToolchainModule:
         updateLockfile = false
       ),
       cwd = Task.dest,
-      env = bunEnv()
+      env = bunToolEnv()
     )
     PathRef(Task.dest)
   }
@@ -147,7 +147,7 @@ trait BunWorkspaceModule extends BunToolchainModule:
         updateLockfile = true
       ),
       cwd = Task.dest,
-      env = bunEnv()
+      env = bunToolEnv()
     )
 
     val generated = Task.dest / "bun.lock"

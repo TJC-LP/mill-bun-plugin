@@ -24,8 +24,13 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
   /** Target used by `bun build`: browser | bun | node. */
   def bunBundleTarget: T[String] = Task { "bun" }
 
-  /** Output format used by `bun build`. */
-  def bunBundleFormat: T[String] = Task { if (enableEsm()) "esm" else "cjs" }
+  /** Output format passed to `bun build --format`; `None` lets bun infer.
+    *
+    * `Option[String]` to match the Scala.js module's member of the same name — a `T[String]`
+    * here made the two module kinds' shared vocabulary diverge on type, which no alias can
+    * bridge. 0.3.0 takes the one-time break.
+    */
+  def bunBundleFormat: T[Option[String]] = Task { Some(if (enableEsm()) "esm" else "cjs") }
 
   /** Emit a standalone executable instead of a JS bundle. */
   @deprecated("Use the compileExecutable task", "0.3.0")
@@ -49,11 +54,8 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
   /** Bun-only package.json fields not modeled by Mill's typed PackageJson. */
   def bunPackageJsonExtras: T[ujson.Obj] = Task { ujson.Obj() }
 
-  /** Environment for Bun toolchain subprocesses such as install/build/test. */
-  protected def bunToolEnv: T[Map[String, String]] = Task { bunEnv() }
-
   /** Runtime environment for Bun-executed programs and tests. */
-  protected def bunRuntimeEnv: T[Map[String, String]] = Task { bunEnv() ++ forkEnv() }
+  def bunRuntimeEnv: T[Map[String, String]] = Task { bunEnv() ++ forkEnv() }
 
   /** TypeScript version used for `bun x tsc`. */
   def typeScriptVersion: T[String] = Task { "5.7.3" }
@@ -146,8 +148,8 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
     }
   }
 
-  /** Replace npm install with bun install. */
-  override def npmInstall: T[PathRef] = Task {
+  /** Install dependencies with Bun. The canonical name; Mill's [[npmInstall]] delegates here. */
+  def bunInstall: T[PathRef] = Task {
     val dest = Task.dest
     os.makeDir.all(dest)
     mkBunPackageJson()
@@ -182,6 +184,9 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
 
     PathRef(dest)
   }
+
+  /** Mill's inherited install name; delegates to [[bunInstall]]. */
+  override def npmInstall: T[PathRef] = Task { bunInstall() }
 
   /** Resolve dependencies and update the source-controlled `bun.lock`. */
   def bunLock(): Command[PathRef] = Task.Command {
@@ -222,7 +227,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
     tscCopyGenSources()
     tscLinkResources()
     BunTypeScriptModule.removeInstallOnlyConfigs(Task.dest)
-    ensureInstallArtifacts(Task.dest, npmInstall().path, bunLockfiles())
+    ensureInstallArtifacts(Task.dest, bunInstall().path, bunLockfiles())
     BunTypeScriptModule.copyBunfigsTo(Task.dest, resolvedBunfigs())
     mkTsconfig()
 
@@ -237,7 +242,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
   }
 
   override def createNodeModulesSymlink: Task[Unit] = Task.Anon {
-    ensureInstallArtifacts(Task.dest, npmInstall().path, bunLockfiles())
+    ensureInstallArtifacts(Task.dest, bunInstall().path, bunLockfiles())
   }
 
   /** Run the entrypoint directly with Bun. */
@@ -291,7 +296,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
 
     // Declared explicitly: the staged tree carries a node_modules symlink into this
     // install, and Mill's filesystem checker only permits reading a dest we depend on.
-    npmInstall()
+    bunInstall()
     BunToolchainModule.copyWorkspace(compileDir, buildDir)
     BunTypeScriptModule.removeInstallOnlyConfigs(buildDir)
     BunTypeScriptModule.copyBunfigsTo(buildDir, resolvedBunfigs())
@@ -309,10 +314,9 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
         "--outfile",
         outFile.toString,
         "--target",
-        bunBundleTarget(),
-        "--format",
-        bunBundleFormat()
-      ) ++ packagesExternal ++ externalArgs ++ compileArgs ++ bunBuildArgs(),
+        bunBundleTarget()
+      ) ++ bunBundleFormat().toSeq.flatMap(format => Seq("--format", format))
+        ++ packagesExternal ++ externalArgs ++ compileArgs ++ bunBuildArgs(),
       cwd = buildDir,
       env = bunToolEnv()
     )
@@ -329,7 +333,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
 
     // Declared explicitly: the staged tree carries a node_modules symlink into this
     // install, and Mill's filesystem checker only permits reading a dest we depend on.
-    npmInstall()
+    bunInstall()
     BunToolchainModule.copyWorkspace(compileDir, buildDir)
     BunTypeScriptModule.removeInstallOnlyConfigs(buildDir)
     BunTypeScriptModule.copyBunfigsTo(buildDir, resolvedBunfigs())
@@ -369,7 +373,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
     val mainFile = resolvedEntrypoint(mainFilePath(), compileDir).relativeTo(compileDir).toString
     // Declared explicitly: the staged tree carries a node_modules symlink into this
     // install, and Mill's filesystem checker only permits reading a dest we depend on.
-    npmInstall()
+    bunInstall()
     BunToolchainModule.copyWorkspace(compileDir, buildDir)
     BunTypeScriptModule.removeInstallOnlyConfigs(buildDir)
     BunTypeScriptModule.copyBunfigsTo(buildDir, resolvedBunfigs())
@@ -499,8 +503,9 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
       bunTestPackageJson().render() == outer.bunWorkspacePackageJson().render()
     }
 
-    override def npmInstall: T[PathRef] = Task {
-      if (reusesOuterInstall()) outer.npmInstall()
+    /** Install this test module's dependencies with Bun; reuses the outer install when equal. */
+    def bunInstall: T[PathRef] = Task {
+      if (reusesOuterInstall()) outer.bunInstall()
       else {
         val dest = Task.dest
         os.makeDir.all(dest)
@@ -539,6 +544,9 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
         PathRef(dest)
       }
     }
+
+    /** Mill's inherited install name; delegates to [[bunInstall]]. */
+    override def npmInstall: T[PathRef] = Task { bunInstall() }
 
     /**
      * Resolve this test module's dependencies and update its own `bun.lock`.
@@ -584,7 +592,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
       val dest = Task.dest
       BunToolchainModule.copyWorkspace(this.compile().path, dest)
       BunTypeScriptModule.removeInstallOnlyConfigs(dest)
-      outer.ensureInstallArtifacts(dest, npmInstall().path, bunLockfiles())
+      outer.ensureInstallArtifacts(dest, bunInstall().path, bunLockfiles())
       BunTypeScriptModule.copyBunfigsTo(dest, outer.resolvedBunfigs())
       PathRef(dest)
     }
@@ -601,6 +609,18 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
       bunTestArgs() ++ timeoutArgs ++ reporterArgs
     }
 
+    /** Run `bun test`. Named after Mill's standard test entrypoint, so both module kinds share it. */
+    def testForked(args: mill.api.Args): Command[CommandResult] = Task.Command {
+      os.call(
+        Seq(bunExecutable(), "test") ++ resolvedTestFlags() ++ args.value,
+        cwd = preparedTestWorkspace().path,
+        env = outer.bunRuntimeEnv(),
+        stdout = os.Inherit,
+        stderr = os.Inherit
+      )
+    }
+
+    @deprecated("Use testForked", "0.3.0")
     def test(args: mill.api.Args): Command[CommandResult] = Task.Command {
       os.call(
         Seq(bunExecutable(), "test") ++ resolvedTestFlags() ++ args.value,

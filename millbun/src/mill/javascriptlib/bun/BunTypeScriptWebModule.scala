@@ -65,7 +65,7 @@ trait BunTypeScriptWebModule extends BunTypeScriptModule:
       sources() ++ generatedSources() ++ resources(),
       webEntryPoints(),
       webPublicSources(),
-      npmInstall().path,
+      bunInstall().path,
       bunfigFiles(),
       webScriptEntryPoint().path
     )

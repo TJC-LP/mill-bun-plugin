@@ -29,6 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Development dependencies are local tooling inputs and are no longer published transitively.
 - `bunPackageJsonExtras` rejects dependency fields now represented by typed settings.
 - Missing dependency versions are represented as `latest` instead of an empty package.json value.
+- TypeScript `bunBundleFormat` is `Option[String]`, matching Scala.js; `None` lets `bun build` infer.
+- `unmanagedDeps` entries are staged into `vendor/` and declared as `file:./vendor/<name>`
+  dependencies, so local packages install under frozen lockfiles and locks stay portable.
+- The TypeScript install task is canonically `bunInstall`; Mill's inherited `npmInstall` delegates to it.
+- `bunToolEnv` is defined once on `BunToolchainModule` for all toolchain subprocesses, and the
+  TypeScript `bunRuntimeEnv` is public.
 
 ### Deprecated
 
@@ -36,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `bunOptionalDeps` in favor of `npmOptionalDeps`.
 - `managedBunExecutable` in favor of `bunExecutableOverride`.
 - The TypeScript `bunCompileExecutable: Boolean` switch in favor of the `compileExecutable` task.
+- The TypeScript test command `test` and the Scala.js test command `bunTest`, both in favor of `testForked`.
 
 ## [0.2.1] - Overridable test-time JS env (2026-04-17)
 

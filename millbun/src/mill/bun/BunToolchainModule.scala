@@ -535,6 +535,9 @@ trait BunToolchainModule extends Module {
   /** Environment passed to Bun subprocesses. */
   def bunEnv: T[Map[String, String]] = Task { Map.empty }
 
+  /** Environment for Bun toolchain subprocesses: install, lock, build, and bundle. */
+  def bunToolEnv: T[Map[String, String]] = Task { bunEnv() }
+
   /** Explicit resolutions for conflicting transitive npm dependency declarations. */
   def npmOverrides: T[Map[String, String]] = Task { Map.empty }
 

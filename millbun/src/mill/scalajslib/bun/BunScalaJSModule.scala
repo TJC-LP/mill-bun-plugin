@@ -301,7 +301,7 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule with BunPac
               updateLockfile = false
             ),
             cwd = dest,
-            env = bunEnv()
+            env = bunToolEnv()
           )
 
         mergeVendoredNodeModules(vendoredEntries, dest / "node_modules")
@@ -332,7 +332,7 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule with BunPac
         updateLockfile = true
       ),
       cwd = dest,
-      env = bunEnv()
+      env = bunToolEnv()
     )
 
     val generated = dest / "bun.lock"
@@ -449,7 +449,7 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule with BunPac
         bytecodeArgs ++
         bunBundleArgs(),
       cwd = linked.dest.path,
-      env = bunEnv()
+      env = bunToolEnv()
     )
 
     PathRef(outDir)
@@ -481,7 +481,7 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule with BunPac
         splittingArgs ++
         bunBundleArgs(),
       cwd = linked.dest.path,
-      env = bunEnv()
+      env = bunToolEnv()
     )
 
     PathRef(outDir)
@@ -518,7 +518,7 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule with BunPac
         bytecodeArgs ++
         bunBundleArgs(),
       cwd = buildDir,
-      env = bunEnv()
+      env = bunToolEnv()
     )
 
     PathRef(outFile)
@@ -560,7 +560,7 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule with BunPac
           bytecodeArgs ++
           bunBundleArgs(),
         cwd = buildDir,
-        env = bunEnv()
+        env = bunToolEnv()
       )
 
       target -> PathRef(outFile)
@@ -624,7 +624,12 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule with BunPac
       linked
     }
 
-    /** Run Scala.js tests through Mill's test bridge with Bun as the JS runtime. */
+    /** Run Scala.js tests through Mill's test bridge with Bun as the JS runtime.
+      *
+      * The inherited `testForked` already does exactly this — the overridden [[jsEnvConfig]] and
+      * [[testLinkTask]] put every test run on Bun — so this alias adds nothing over it.
+      */
+    @deprecated("Use the inherited testForked", "0.3.0")
     def bunTest(args: mill.api.Args): Command[(msg: String, results: Seq[mill.javalib.testrunner.TestResult])] =
       Task.Command {
         testTask(

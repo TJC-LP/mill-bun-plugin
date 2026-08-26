@@ -79,7 +79,7 @@ object fullstack extends Module {
 // No moduleDir or sources overrides needed.
 //
 //   ./mill tsLib.compile                  # TypeScript type-check
-//   ./mill tsLib.test.test                # Bun-native tests
+//   ./mill tsLib.test.testForked              # Bun-native tests
 //   ./mill client.bundle                  # TS browser bundle (imports tsLib)
 //   ./mill scalaClient.bundle             # Scala.js browser bundle
 //   ./mill backend.run                    # JVM Cask server on :8080
