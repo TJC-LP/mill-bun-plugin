@@ -74,7 +74,11 @@ trait BunTypeScriptWebModule extends BunTypeScriptModule:
 
   /** Start Bun's HTML development server with source mirroring for native HMR. */
   def dev(): Command[Unit] = Task.Command {
-    val stage = webStage().path
+    // Serve from a private copy: the sync thread mirrors live edits (but never deletions) into
+    // the serving root, and `bundle` builds from the same cached stage — mutating it in place
+    // would let a file created and deleted during a dev session ship in the production bundle.
+    val stage = Task.dest / "stage"
+    mill.bun.BunToolchainModule.copyTree(webStage().path, stage)
     val entries = BunWebSupport.htmlEntries(webEntryPoints(), moduleDir, stage)
     val syncRoots = (sources() ++ generatedSources() ++ resources() ++ webEntryPoints() ++ webPublicSources())
       .filter(ref => os.exists(ref.path) && ref.path.startsWith(moduleDir))
