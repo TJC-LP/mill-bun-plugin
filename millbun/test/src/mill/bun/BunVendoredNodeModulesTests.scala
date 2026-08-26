@@ -100,6 +100,25 @@ object BunVendoredNodeModulesTests extends TestSuite {
 
       assert(err.getMessage.contains("Vendored Bun bundle conflict"))
     }
+
+    test("merging through a symlinked destination is refused") {
+      // In workspace mode node_modules links into the shared install's Task.dest. Merging
+      // through it would silently mutate a directory every workspace member depends on.
+      val source = os.temp.dir()
+      writeVendoredPackage(source, "react", "19.1.1")
+
+      val shared = os.temp.dir() / "shared-node-modules"
+      os.makeDir.all(shared)
+      val member = os.temp.dir()
+      os.symlink(member / "node_modules", shared)
+
+      val err = intercept[RuntimeException] {
+        BunVendoredNodeModules.mergeFromClasspathEntry(source, member / "node_modules")
+      }
+      assert(err.getMessage.contains("belongs to another task"))
+      // The critical assertion: nothing leaked into the shared directory.
+      assert(os.list(shared).isEmpty)
+    }
   }
 
   private def writeVendoredPackage(root: os.Path, name: String, version: String): Unit = {

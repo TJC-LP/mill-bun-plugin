@@ -254,8 +254,21 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule with BunPac
         transitiveUnmanagedDeps().nonEmpty ||
         bunPackageJsonExtras().value.nonEmpty
 
+    val ownResourceRoots = resources().map(_.path).toSet
+    val vendoredEntries = runClasspath().map(_.path).filterNot(ownResourceRoots.contains)
+
     bunWorkspaceInstall() match
       case Some(workspaceInstall) =>
+        // Vendored trees must not be merged here: node_modules is a link into the workspace
+        // install's dest, so merging would mutate a directory shared by every workspace member.
+        val vendored = vendoredEntries.filter(BunVendoredNodeModules.hasVendoredNodeModules)
+        if vendored.nonEmpty then
+          Task.fail(
+            s"Bun workspace members cannot consume vendored runtime dependencies: " +
+              s"${vendored.map(_.last).mkString(", ")}. Depend on the manifest-only artifact, or " +
+              "install this module outside the workspace."
+          )
+
         val installed = workspaceInstall.path
         if os.exists(installed / "node_modules") then
           os.symlink(dest / "node_modules", installed / "node_modules")
@@ -281,9 +294,7 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule with BunPac
             env = bunEnv()
           )
 
-    val ownResourceRoots = resources().map(_.path).toSet
-    val vendoredEntries = runClasspath().map(_.path).filterNot(ownResourceRoots.contains)
-    mergeVendoredNodeModules(vendoredEntries, dest / "node_modules")
+        mergeVendoredNodeModules(vendoredEntries, dest / "node_modules")
 
     PathRef(dest)
   }

@@ -50,7 +50,32 @@ object BunDepTests extends TestSuite {
       assert(deps.head.startsWith("@anthropic-ai"))
     }
 
-    // Invalid literal coverage lives in integration tests so the interpolator
+    test("the interpolator and the task-time parser accept the same inputs") {
+      // The macro used to run its own weaker parser, so bun"react@" compiled and then threw
+      // during the install. Both must now agree, in both directions.
+      Seq("react@^19.0.0", "@types/node", "zod", "lodash@~4.17.0", "@scope/pkg@1.0.0").foreach {
+        valid =>
+          assert(BunDep.validate(valid) == valid)
+          assert(BunToolchainModule.parseDependency(valid).isRight)
+      }
+
+      Seq("", "react@", "@types", "@types/bun@", "@/pkg").foreach { invalid =>
+        val error = intercept[IllegalArgumentException](BunDep.validate(invalid))
+        assert(error.getMessage.contains("Invalid bun dependency"))
+        assert(BunToolchainModule.parseDependency(invalid).isLeft)
+      }
+    }
+
+    test("interpolated forms are validated when the build evaluates them") {
+      // Not knowable at compile time, so this is the runtime backstop.
+      val version = "^19.0.0"
+      assert(bun"react@$version" == "react@^19.0.0")
+
+      val empty = ""
+      intercept[IllegalArgumentException](bun"react@$empty")
+    }
+
+    // Invalid *literal* coverage lives in integration tests so the interpolator
     // is compiled in a normal build.mill context rather than inside another macro.
   }
 }
