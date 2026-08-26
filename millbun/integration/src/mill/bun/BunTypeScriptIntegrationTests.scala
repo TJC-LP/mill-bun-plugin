@@ -178,6 +178,9 @@ object BunTypeScriptIntegrationTests extends TestSuite {
 
     test("test deps are devDependencies") {
       val tester = this.tester("typescript-test-deps")
+      // The fixture sets bunRequireLockfile, so both modules need a lock before installing.
+      assert(tester.eval("app.bunLock").isSuccess)
+      assert(tester.eval("app.test.bunLock").isSuccess)
 
       // Outer module should have is-even in dependencies
       val outerRes = tester.eval("app.npmInstall")
@@ -199,6 +202,47 @@ object BunTypeScriptIntegrationTests extends TestSuite {
       // Tests should actually run (both deps available)
       val runRes = tester.eval("app.test.test")
       assert(runRes.isSuccess)
+    }
+
+    test("test modules with extra deps own their lockfile") {
+      // A test module installs a strict superset of the outer package.json. Reusing the outer
+      // module's lock under --frozen-lockfile fails with "lockfile had changes, but lockfile is
+      // frozen", so the test module needs its own lock and its own bunLock command.
+      val tester = this.tester("typescript-test-deps")
+
+      // Without any lock, the install refuses and names the test module's own path.
+      val unlocked = tester.eval("app.test.npmInstall")
+      assert(!unlocked.isSuccess)
+
+      assert(tester.eval("app.bunLock").isSuccess)
+      assert(tester.eval("app.test.bunLock").isSuccess)
+
+      val outerLock = tester.workspacePath / "bun.lock"
+      val testLock = tester.workspacePath / "test" / "bun.lock"
+      assert(os.exists(outerLock))
+      assert(os.exists(testLock))
+      assert(os.read(outerLock) != os.read(testLock))
+
+      // Compare the `workspaces` block, which records the root package's *declared* deps.
+      // is-odd also arrives transitively through is-even, so a whole-file substring match
+      // would not distinguish the two locks.
+      def declaredDeps(lock: os.Path): String =
+        val text = os.read(lock)
+        text.slice(text.indexOf("\"workspaces\""), text.indexOf("\"packages\""))
+
+      assert(!declaredDeps(outerLock).contains("is-odd"))
+      assert(declaredDeps(testLock).contains("is-odd"))
+
+      // The frozen install now succeeds against the test module's own lock.
+      assert(tester.eval("app.test.npmInstall").isSuccess)
+      assert(tester.eval("app.test.test").isSuccess)
+    }
+
+    test("test modules adding nothing reuse the outer install") {
+      // A bare test module must not demand a second lockfile.
+      val tester = this.tester("typescript-tests")
+      assert(tester.eval("app.test.npmInstall").isSuccess)
+      assert(!os.exists(tester.workspacePath / "test" / "bun.lock"))
     }
 
     test("bunEnv") {
