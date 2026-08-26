@@ -287,7 +287,7 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule with BunPac
         }
       case None =>
         val lockfile = bunLockfile()
-        requireBunLockfile(hasInstallInputs, lockfile, bunRequireLockfile())
+        requireBunLockfile(hasInstallInputs, lockfile, bunRequireLockfile(), bunVersion())
         copyBunLockfile(lockfile, dest)
 
         if hasInstallInputs then

@@ -166,7 +166,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
         }
       case None =>
         val lockfile = bunLockfile()
-        requireBunLockfile(true, lockfile, bunRequireLockfile())
+        requireBunLockfile(true, lockfile, bunRequireLockfile(), bunVersion())
         copyBunLockfile(lockfile, dest)
         BunToolchainModule.stageUnmanagedDeps(transitiveUnmanagedDeps(), dest)
 
@@ -521,6 +521,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
           hasInstallInputs = true,
           lockfile = lockfile,
           required = outer.bunRequireLockfile(),
+          pinnedBunVersion = outer.bunVersion(),
           lockfilePath = moduleDir / "bun.lock"
         )
         outer.copyBunLockfile(lockfile, dest)

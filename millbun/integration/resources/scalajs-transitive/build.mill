@@ -10,13 +10,13 @@ import mill.scalajslib.*
 import mill.scalajslib.api.*
 import mill.scalajslib.bun.*
 
+// lib keeps its own moduleDir (lib/): sharing the root with app would make both modules
+// resolve the same bun.lock, and only one dependency set can be recorded there.
 object lib extends BunScalaJSModule {
-  override def moduleDir = build.moduleDir
   def scalaVersion = "3.8.2"
   def scalaJSVersion = "1.22.0"
 
   override def moduleKind = Task { ModuleKind.ESModule }
-  override def sources = Task.Sources(moduleDir / "lib")
   override def npmDeps = Task { Seq("lodash@4.17.21") }
 }
 

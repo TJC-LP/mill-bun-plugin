@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `BunWorkspaceModule` for one install and lockfile across mixed Scala.js/TypeScript packages.
 - Published dependency manifest schema v2 with runtime, optional, and peer requirements.
 - `bunDoctor` diagnostics and managed-toolchain CI smoke coverage.
+- A committed lockfile written by a newer Bun fails frozen installs with regeneration guidance,
+  instead of surfacing bun's raw `UnknownLockfileVersion`.
 
 ### Changed
 

@@ -75,6 +75,33 @@ object BunToolchainModule {
   /** Versions with a complete bundled checksum table, for diagnostics. */
   private[bun] def bundledVersions: Seq[String] = BundledChecksums.keys.toSeq.sorted
 
+  /** Highest `lockfileVersion` each bundled Bun can read. 1.4.0 writes v2; 1.3.14 fails on v2. */
+  private val SupportedLockfileVersions: Map[String, Int] = Map(
+    "1.3.14" -> 1,
+    "1.4.0" -> 2
+  )
+
+  private[bun] def supportedLockfileVersion(bunVersion: String): Option[Int] =
+    SupportedLockfileVersions.get(bunVersion)
+
+  /** bun.lock is JSONC (trailing commas), so extract the version lexically rather than parsing. */
+  private[bun] def lockfileVersion(lockText: String): Option[Int] =
+    """"lockfileVersion"\s*:\s*(\d+)""".r.findFirstMatchIn(lockText).map(_.group(1).toInt)
+
+  /** Error text when the committed lock was written by a newer Bun; None when readable. */
+  private[bun] def lockfileSkewError(
+      lockText: String,
+      lockPath: os.Path,
+      pinnedBunVersion: String
+  ): Option[String] =
+    for {
+      version <- lockfileVersion(lockText)
+      supported <- supportedLockfileVersion(pinnedBunVersion)
+      if version > supported
+    } yield s"$lockPath has lockfileVersion $version, which Bun $pinnedBunVersion cannot read " +
+      s"(it supports up to $supported). Regenerate the lockfile with this module's bunLock " +
+      "command, or raise bunVersion."
+
   /**
    * Compose a Bun release asset name from the platform axes.
    *
@@ -600,12 +627,19 @@ trait BunToolchainModule extends Module {
       hasInstallInputs: Boolean,
       lockfile: Option[PathRef],
       required: Boolean,
+      pinnedBunVersion: String,
       lockfilePath: os.Path = moduleDir / "bun.lock"
   ): Unit = {
     if (hasInstallInputs && required && lockfile.isEmpty) {
       throw new RuntimeException(
         s"Missing $lockfilePath. Run this module's bunLock command and commit the generated lockfile."
       )
+    }
+    // bun.lock is forward- but not backward-compatible: a lock written by a newer Bun makes an
+    // older one fail with a raw UnknownLockfileVersion that never mentions how to recover.
+    lockfile.foreach { lock =>
+      BunToolchainModule.lockfileSkewError(os.read(lock.path), lock.path, pinnedBunVersion)
+        .foreach(message => throw new RuntimeException(message))
     }
   }
 
