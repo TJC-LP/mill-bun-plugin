@@ -50,23 +50,16 @@ trait BunTypeScriptWebModule extends BunTypeScriptModule:
     configs.foreach(ref => os.copy.over(ref.path, destination / ref.path.last, createFolders = true))
 
     val script = "./" + scriptEntryPoint.relativeTo(moduleDir).toString.replace('\\', '/')
-    BunWebSupport.htmlEntries(htmlRefs, moduleDir, destination, script)
+    BunWebSupport.materializeHtmlEntries(htmlRefs, moduleDir, destination, script)
   }
 
-  private def webDevelopmentStage: T[PathRef] = Task {
-    prepareWebStage(
-      Task.dest,
-      sources() ++ generatedSources() ++ resources(),
-      webEntryPoints(),
-      webPublicSources(),
-      npmInstall().path,
-      bunfigFiles(),
-      webScriptEntryPoint().path
-    )
-    PathRef(Task.dest)
-  }
-
-  private def webProductionStage: T[PathRef] = Task {
+  /**
+   * Staged sources, HTML, static files, and `node_modules` that both `dev` and `bundle` build from.
+   *
+   * A single task: development and production stage identically, and differ only in the flags
+   * `bundle` passes to `bun build`.
+   */
+  private def webStage: T[PathRef] = Task {
     prepareWebStage(
       Task.dest,
       sources() ++ generatedSources() ++ resources(),
@@ -81,9 +74,8 @@ trait BunTypeScriptWebModule extends BunTypeScriptModule:
 
   /** Start Bun's HTML development server with source mirroring for native HMR. */
   def dev(): Command[Unit] = Task.Command {
-    val stage = webDevelopmentStage().path
-    val script = "./" + webScriptEntryPoint().path.relativeTo(moduleDir).toString.replace('\\', '/')
-    val entries = BunWebSupport.htmlEntries(webEntryPoints(), moduleDir, stage, script)
+    val stage = webStage().path
+    val entries = BunWebSupport.htmlEntries(webEntryPoints(), moduleDir, stage)
     val syncRoots = (sources() ++ generatedSources() ++ resources() ++ webEntryPoints() ++ webPublicSources())
       .filter(ref => os.exists(ref.path) && ref.path.startsWith(moduleDir))
       .map(ref => ref.path -> (stage / ref.path.relativeTo(moduleDir)))
@@ -100,9 +92,8 @@ trait BunTypeScriptWebModule extends BunTypeScriptModule:
 
   /** Build complete optimized HTML/CSS/JavaScript assets under `dist`. */
   override def bundle: T[PathRef] = Task {
-    val stage = webProductionStage().path
-    val script = "./" + webScriptEntryPoint().path.relativeTo(moduleDir).toString.replace('\\', '/')
-    val entries = BunWebSupport.htmlEntries(webEntryPoints(), moduleDir, stage, script)
+    val stage = webStage().path
+    val entries = BunWebSupport.htmlEntries(webEntryPoints(), moduleDir, stage)
     val destination = Task.dest / "dist"
     runBun(
       bunExecutable(),

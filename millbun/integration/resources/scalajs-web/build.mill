@@ -16,6 +16,7 @@ object app extends BunScalaJSWebModule {
   def scalaVersion = "3.8.2"
   def scalaJSVersion = "1.22.0"
   def mvnDeps = Seq(mvn"org.scala-js::scalajs-dom::2.8.1")
+  override def npmDeps = Task { Seq("lodash@4.17.21") }
   override def mainClass = Some("Main")
   override def moduleKind = Task { ModuleKind.ESModule }
 }

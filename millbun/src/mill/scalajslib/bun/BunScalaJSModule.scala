@@ -474,6 +474,9 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule with BunPac
   /** Build a server-side Scala.js entrypoint as a standalone executable. */
   def compileExecutable: T[PathRef] = Task {
     val linked = fullLinkJS()
+    // Declared explicitly: the staged workspace carries a node_modules symlink into this
+    // install, and Mill's filesystem checker only permits reading a dest we depend on.
+    bunInstall()
     val buildDir = Task.dest / "workspace"
     BunToolchainModule.copyWorkspace(linked.dest.path, buildDir)
     resolvedBunConfigs().foreach(cfg => os.copy.over(cfg.path, buildDir / cfg.path.last, createFolders = true))
@@ -511,6 +514,7 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule with BunPac
     if (targets.isEmpty) Task.fail("bunCompileTargets is empty. Set targets like Seq(\"bun-linux-x64\", \"bun-darwin-arm64\").")
 
     val linked = fullLinkJS()
+    bunInstall()
     val buildDir = Task.dest / "workspace"
     BunToolchainModule.copyWorkspace(linked.dest.path, buildDir)
     resolvedBunConfigs().foreach(cfg => os.copy.over(cfg.path, buildDir / cfg.path.last, createFolders = true))
