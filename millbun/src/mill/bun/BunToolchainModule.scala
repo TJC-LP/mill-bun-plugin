@@ -480,14 +480,19 @@ trait BunToolchainModule extends Module {
        else Seq.empty)
   }
 
+  /**
+   * @param lockfilePath where the missing lockfile is expected. Nested modules must pass their own
+   *                     path, or the error points a user at the wrong file.
+   */
   protected def requireBunLockfile(
       hasInstallInputs: Boolean,
       lockfile: Option[PathRef],
-      required: Boolean
+      required: Boolean,
+      lockfilePath: os.Path = moduleDir / "bun.lock"
   ): Unit = {
     if (hasInstallInputs && required && lockfile.isEmpty) {
       throw new RuntimeException(
-        s"Missing ${moduleDir / "bun.lock"}. Run this module's bunLock command and commit the generated lockfile."
+        s"Missing $lockfilePath. Run this module's bunLock command and commit the generated lockfile."
       )
     }
   }

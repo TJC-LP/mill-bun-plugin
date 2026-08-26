@@ -418,23 +418,26 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
     /** Coverage reporter formats. */
     def bunCoverageReporters: T[Seq[String]] = Task { Seq("text", "lcov") }
 
-    override def npmInstall: T[PathRef] = Task {
-      val dest = Task.dest
-      os.makeDir.all(dest)
-
-      // Merge outer + test-side deps into a single package.json.
-      // Upstream Mill's test npmInstall runs `npm install --save-dev` with the
-      // test module's transitive deps; we achieve the same by building one
-      // merged package.json before `bun install`.
+    /**
+     * Merged outer + test-side package.json, shared by [[npmInstall]] and [[bunLock]].
+     *
+     * One task so the install and the lockfile can never describe different dependency sets —
+     * that divergence is what made frozen installs of test modules fail.
+     *
+     * Upstream Mill's test `npmInstall` runs `npm install --save-dev` with the test module's
+     * transitive deps; building one merged package.json achieves the same for Bun.
+     */
+    def bunTestPackageJson: T[ujson.Obj] = Task {
       val user = outer.packageJson()
       val overrides = outer.npmOverrides()
       val outerDeps = BunToolchainModule.dependencyPairs(outer.transitiveNpmDeps(), overrides)
-      val outerDevDeps = BunToolchainModule.dependencyPairs(outer.transitiveNpmDevDeps() ++ outer.tsDeps(), overrides)
+      val outerDevDeps =
+        BunToolchainModule.dependencyPairs(outer.transitiveNpmDevDeps() ++ outer.tsDeps(), overrides)
       val outerPackageNames = (outerDeps.iterator ++ outerDevDeps.iterator).map(_._1).toSet
       // Test-only deps are dev dependencies — they should not appear in the
       // production dependencies field, matching Bun/npm convention.
       val testDevDeps = BunToolchainModule
-        .dependencyPairs(transitiveNpmDeps() ++ this.npmDevDeps() ++ this.tsDeps(), overrides)
+        .dependencyPairs(this.transitiveNpmDeps() ++ this.npmDevDeps() ++ this.tsDeps(), overrides)
         .filterNot { case (name, _) => outerPackageNames.contains(name) }
 
       val resolved = ujson.Obj.from(
@@ -456,28 +459,99 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
           overrides.toSeq.sortBy(_._1).map((name, value) => name -> ujson.Str(value))
         )
 
-      val merged = BunToolchainModule.mergePackageJson(resolved, outer.bunPackageJsonExtras())
-      os.write.over(dest / "package.json", merged.render(indent = 2), createFolders = true)
+      BunToolchainModule.mergePackageJson(resolved, outer.bunPackageJsonExtras())
+    }
 
+    /**
+     * Source-controlled lockfile for this test module, at `<test module>/bun.lock`.
+     *
+     * Declared here rather than inherited from the enclosing module: a test module that adds
+     * dependencies installs a strict superset of the outer package.json, which the outer module's
+     * lockfile cannot satisfy under `--frozen-lockfile`.
+     */
+    def bunLockfile: T[Option[PathRef]] = Task.Input {
+      val path = moduleDir / "bun.lock"
+      if (os.exists(path)) Some(PathRef(path)) else None
+    }
+
+    /** True when the test module adds nothing the outer install does not already provide. */
+    private def reusesOuterInstall: Task[Boolean] = Task.Anon {
+      bunTestPackageJson().render() == outer.bunWorkspacePackageJson().render()
+    }
+
+    override def npmInstall: T[PathRef] = Task {
+      if (reusesOuterInstall()) outer.npmInstall()
+      else {
+        val dest = Task.dest
+        os.makeDir.all(dest)
+        os.write.over(
+          dest / "package.json",
+          bunTestPackageJson().render(indent = 2),
+          createFolders = true
+        )
+        outer.copyBunWorkspaceConfigs()
+
+        val lockfile = this.bunLockfile()
+        outer.requireBunLockfile(
+          hasInstallInputs = true,
+          lockfile = lockfile,
+          required = outer.bunRequireLockfile(),
+          lockfilePath = moduleDir / "bun.lock"
+        )
+        outer.copyBunLockfile(lockfile, dest)
+
+        outer.runBun(
+          outer.bunExecutable(),
+          Seq("install") ++ outer.resolvedBunInstallArgs(
+            outer.bunInstallArgs(),
+            outer.bunInstallExtraArgs(),
+            lockfile.nonEmpty,
+            updateLockfile = false
+          ) ++ (outer.transitiveUnmanagedDeps() ++ this.transitiveUnmanagedDeps())
+            .distinct.map(_.path.toString),
+          cwd = dest,
+          env = outer.bunToolEnv()
+        )
+
+        PathRef(dest)
+      }
+    }
+
+    /**
+     * Resolve this test module's dependencies and update its own `bun.lock`.
+     *
+     * Unlike the outer module's, this does not refuse for workspace members: a test module with
+     * extra dependencies genuinely needs its own install and its own lock.
+     */
+    def bunLock(): Command[PathRef] = Task.Command {
+      val dest = Task.dest
+      os.makeDir.all(dest)
+      os.write.over(
+        dest / "package.json",
+        bunTestPackageJson().render(indent = 2),
+        createFolders = true
+      )
       outer.copyBunWorkspaceConfigs()
+      outer.copyBunLockfile(this.bunLockfile(), dest)
 
-      val lockfile = bunLockfile()
-      requireBunLockfile(true, lockfile, bunRequireLockfile())
-      copyBunLockfile(lockfile, dest)
-
-      runBun(
-        bunExecutable(),
-        Seq("install") ++ resolvedBunInstallArgs(
-          bunInstallArgs(),
-          bunInstallExtraArgs(),
-          lockfile.nonEmpty,
-          updateLockfile = false
-        ) ++ (outer.transitiveUnmanagedDeps() ++ transitiveUnmanagedDeps()).distinct.map(_.path.toString),
+      outer.runBun(
+        outer.bunExecutable(),
+        Seq("install") ++ outer.resolvedBunInstallArgs(
+          outer.bunInstallArgs(),
+          outer.bunInstallExtraArgs(),
+          this.bunLockfile().nonEmpty,
+          updateLockfile = true
+        ) ++ (outer.transitiveUnmanagedDeps() ++ this.transitiveUnmanagedDeps())
+          .distinct.map(_.path.toString),
         cwd = dest,
         env = outer.bunToolEnv()
       )
 
-      PathRef(dest)
+      val generated = dest / "bun.lock"
+      if (!os.exists(generated)) Task.fail("Bun did not generate bun.lock")
+      val sourceLock = moduleDir / "bun.lock"
+      os.copy.over(generated, sourceLock, createFolders = true)
+      PathRef(sourceLock)
     }
 
     protected def preparedTestWorkspace: T[PathRef] = Task {
