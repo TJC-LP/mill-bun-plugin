@@ -409,6 +409,18 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
    */
   trait BunTypeScriptTests extends TypeScriptTests {
 
+    /**
+     * The outer module's Bun-specific TS toolchain, not upstream Mill's ts-node defaults.
+     *
+     * This trait extends upstream `TypeScriptTests`, so an unqualified `tsDeps()` resolves to
+     * the Node toolchain (`ts-node`, `tsconfig-paths`, `@types/node`) that the outer trait
+     * deliberately replaced. Those names always survived the outer-name filter in
+     * [[bunTestPackageJson]], so a bare test module's package.json never matched the outer's
+     * and the install-reuse path in [[npmInstall]] was unreachable — with `bunRequireLockfile`
+     * on, every bare test module demanded its own lockfile.
+     */
+    override def tsDeps: T[Seq[String]] = Task { outer.tsDeps() }
+
     /** Test timeout in milliseconds. 0 means no timeout. */
     def bunTestTimeout: T[Int] = Task { 0 }
 

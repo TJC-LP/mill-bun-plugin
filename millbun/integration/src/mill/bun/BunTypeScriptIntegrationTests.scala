@@ -243,6 +243,10 @@ object BunTypeScriptIntegrationTests extends TestSuite {
       val tester = this.tester("typescript-tests")
       assert(tester.eval("app.test.npmInstall").isSuccess)
       assert(!os.exists(tester.workspacePath / "test" / "bun.lock"))
+      // And must actually reuse the outer install — not run a second one that merely succeeds
+      // because the lockfile requirement happens to be off in this suite.
+      val installPath = outputPath(tester, "app.test.npmInstall")
+      assert(installPath == tester.workspacePath / "out" / "app" / "npmInstall.dest")
     }
 
     test("bunEnv") {
