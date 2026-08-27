@@ -123,10 +123,12 @@ object BunScalaJSIntegrationTests extends TestSuite {
       assert(runBundledScript(mainJs) == "Hello from transitive scala.js bun")
     }
 
-    test("bunTest") {
+    test("testForked runs Scala.js tests on Bun") {
       val tester = this.tester("scalajs-test")
-      val res = tester.eval("app.test.bunTest")
+      val res = tester.eval("app.test.testForked")
       assert(res.isSuccess)
+      // The deprecated alias must keep resolving until removal.
+      assert(tester.eval("app.test.bunTest").isSuccess)
     }
 
     test("bunfig propagates to Scala.js workspaces without leaking .npmrc") {
@@ -150,7 +152,7 @@ object BunScalaJSIntegrationTests extends TestSuite {
       assert(os.exists(compileWorkspace / "bunfig.toml"))
       assert(!os.exists(compileWorkspace / ".npmrc"))
 
-      val testRes = tester.eval("app.test.bunTest")
+      val testRes = tester.eval("app.test.testForked")
       assert(testRes.isSuccess)
       val testRoot = tester.workspacePath / "out" / "app" / "test"
       assert(os.exists(testRoot))

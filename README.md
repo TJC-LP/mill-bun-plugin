@@ -45,7 +45,7 @@ Scala.js versions are explicit: choose the version your application tests agains
 ./mill app.run
 ./mill app.bundle
 ./mill app.compileExecutable
-./mill app.test.test
+./mill app.test.testForked
 ```
 
 `BunScalaJSModule` delegates `fastLinkJS`, `fullLinkJS`, and test linking to Mill's standard `ScalaJSModule` hooks. That keeps the plugin compatible with Mill's linker lifecycle and removes its former private linker-worker coupling.
@@ -76,7 +76,7 @@ object app extends BunTypeScriptModule {
 ./mill app.run
 ./mill app.bundle
 ./mill app.compileExecutable
-./mill app.test.test
+./mill app.test.testForked
 ```
 
 ## Web applications

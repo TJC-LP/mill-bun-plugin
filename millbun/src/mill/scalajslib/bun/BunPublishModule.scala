@@ -98,7 +98,7 @@ trait BunPublishModule extends BunScalaJSModule {
           updateLockfile = false
         ),
         cwd = dest,
-        env = bunEnv()
+        env = bunToolEnv()
       )
 
     PathRef(dest)

@@ -18,5 +18,5 @@ object app extends BunTypeScriptModule {
     )
   }
   override def bunBundleTarget = Task { "bun" }
-  override def bunBundleFormat = Task { "esm" }
+  override def bunBundleFormat = Task { Some("esm") }
 }

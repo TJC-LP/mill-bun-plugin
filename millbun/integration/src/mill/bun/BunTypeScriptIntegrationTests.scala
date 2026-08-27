@@ -86,25 +86,25 @@ object BunTypeScriptIntegrationTests extends TestSuite {
 
     test("strict installs require a source lock and bunLock creates it") {
       val tester = this.tester("typescript-lock")
-      val missingLock = tester.eval("app.npmInstall")
+      val missingLock = tester.eval("app.bunInstall")
       assert(!missingLock.isSuccess)
 
       val lockResult = tester.eval("app.bunLock")
       assert(lockResult.isSuccess)
       assert(os.exists(tester.workspacePath / "bun.lock"))
 
-      val installResult = tester.eval("app.npmInstall")
+      val installResult = tester.eval("app.bunInstall")
       assert(installResult.isSuccess)
-      val args = os.read(tester.workspacePath / "out" / "app" / "npmInstall.dest" / ".bun-args")
+      val args = os.read(tester.workspacePath / "out" / "app" / "bunInstall.dest" / ".bun-args")
       assert(args.contains("--frozen-lockfile"))
     }
 
     test("bun target ambient types are pinned") {
       val tester = this.tester("typescript-simple")
-      val res = tester.eval("app.npmInstall")
+      val res = tester.eval("app.bunInstall")
       assert(res.isSuccess)
 
-      val packageJson = ujson.read(os.read(tester.workspacePath / "out" / "app" / "npmInstall.dest" / "package.json"))
+      val packageJson = ujson.read(os.read(tester.workspacePath / "out" / "app" / "bunInstall.dest" / "package.json"))
       val devDeps = packageJson("devDependencies").obj
 
       // Pinned, and pinned to the Bun we ship: @types/bun is published in lockstep with Bun.
@@ -118,7 +118,7 @@ object BunTypeScriptIntegrationTests extends TestSuite {
       val res = tester.eval("app.compile")
       assert(res.isSuccess)
 
-      val packageJson = ujson.read(os.read(tester.workspacePath / "out" / "app" / "npmInstall.dest" / "package.json"))
+      val packageJson = ujson.read(os.read(tester.workspacePath / "out" / "app" / "bunInstall.dest" / "package.json"))
       val devDeps = packageJson("devDependencies").obj
 
       assert(devDeps("typescript").str == "5.7.3")
@@ -128,8 +128,12 @@ object BunTypeScriptIntegrationTests extends TestSuite {
 
     test("bun test module") {
       val tester = this.tester("typescript-tests")
-      val res = tester.eval("app.test.test")
+      val res = tester.eval("app.test.testForked")
       assert(res.isSuccess)
+      // Deprecated and inherited aliases must keep resolving until removal.
+      assert(tester.eval("app.test.test").isSuccess)
+      assert(tester.eval("app.npmInstall").isSuccess)
+      assert(outputPath(tester, "app.npmInstall") == tester.workspacePath / "out" / "app" / "bunInstall.dest")
     }
 
     test("bundle workers") {
@@ -165,7 +169,7 @@ object BunTypeScriptIntegrationTests extends TestSuite {
       val res = tester.eval("app.compile")
       assert(res.isSuccess)
 
-      val installDir = tester.workspacePath / "out" / "app" / "npmInstall.dest"
+      val installDir = tester.workspacePath / "out" / "app" / "bunInstall.dest"
       val compileDir = tester.workspacePath / "out" / "app" / "compile.dest"
 
       // Install workspace keeps both configs.
@@ -183,16 +187,16 @@ object BunTypeScriptIntegrationTests extends TestSuite {
       assert(tester.eval("app.test.bunLock").isSuccess)
 
       // Outer module should have is-even in dependencies
-      val outerRes = tester.eval("app.npmInstall")
+      val outerRes = tester.eval("app.bunInstall")
       assert(outerRes.isSuccess)
-      val outerPkg = ujson.read(os.read(tester.workspacePath / "out" / "app" / "npmInstall.dest" / "package.json"))
+      val outerPkg = ujson.read(os.read(tester.workspacePath / "out" / "app" / "bunInstall.dest" / "package.json"))
       assert(outerPkg("dependencies").obj.contains("is-even"))
       assert(!outerPkg("dependencies").obj.contains("is-odd"))
 
       // Test module should have is-odd in devDependencies (not dependencies)
-      val testRes = tester.eval("app.test.npmInstall")
+      val testRes = tester.eval("app.test.bunInstall")
       assert(testRes.isSuccess)
-      val testPkg = ujson.read(os.read(tester.workspacePath / "out" / "app" / "test" / "npmInstall.dest" / "package.json"))
+      val testPkg = ujson.read(os.read(tester.workspacePath / "out" / "app" / "test" / "bunInstall.dest" / "package.json"))
       assert(testPkg("devDependencies").obj.contains("is-odd"))
       assert(!testPkg("dependencies").obj.contains("is-odd"))
       assert(!testPkg("devDependencies").obj.contains("is-even"))
@@ -200,7 +204,7 @@ object BunTypeScriptIntegrationTests extends TestSuite {
       assert(testPkg("dependencies").obj.contains("is-even"))
 
       // Tests should actually run (both deps available)
-      val runRes = tester.eval("app.test.test")
+      val runRes = tester.eval("app.test.testForked")
       assert(runRes.isSuccess)
     }
 
@@ -211,7 +215,7 @@ object BunTypeScriptIntegrationTests extends TestSuite {
       val tester = this.tester("typescript-test-deps")
 
       // Without any lock, the install refuses and names the test module's own path.
-      val unlocked = tester.eval("app.test.npmInstall")
+      val unlocked = tester.eval("app.test.bunInstall")
       assert(!unlocked.isSuccess)
 
       assert(tester.eval("app.bunLock").isSuccess)
@@ -234,8 +238,8 @@ object BunTypeScriptIntegrationTests extends TestSuite {
       assert(declaredDeps(testLock).contains("is-odd"))
 
       // The frozen install now succeeds against the test module's own lock.
-      assert(tester.eval("app.test.npmInstall").isSuccess)
-      assert(tester.eval("app.test.test").isSuccess)
+      assert(tester.eval("app.test.bunInstall").isSuccess)
+      assert(tester.eval("app.test.testForked").isSuccess)
     }
 
     test("unmanaged local packages install under a frozen lockfile") {
@@ -248,8 +252,8 @@ object BunTypeScriptIntegrationTests extends TestSuite {
       // The lock must not record where this repository happens to be checked out.
       assert(!lock.contains(tester.workspacePath.toString))
 
-      assert(tester.eval("app.npmInstall").isSuccess)
-      val installed = outputPath(tester, "app.npmInstall")
+      assert(tester.eval("app.bunInstall").isSuccess)
+      val installed = outputPath(tester, "app.bunInstall")
       assert(os.exists(installed / "node_modules" / "local-lib" / "package.json"))
 
       assert(tester.eval("app.bundle").isSuccess)
@@ -261,12 +265,12 @@ object BunTypeScriptIntegrationTests extends TestSuite {
     test("test modules adding nothing reuse the outer install") {
       // A bare test module must not demand a second lockfile.
       val tester = this.tester("typescript-tests")
-      assert(tester.eval("app.test.npmInstall").isSuccess)
+      assert(tester.eval("app.test.bunInstall").isSuccess)
       assert(!os.exists(tester.workspacePath / "test" / "bun.lock"))
       // And must actually reuse the outer install — not run a second one that merely succeeds
       // because the lockfile requirement happens to be off in this suite.
-      val installPath = outputPath(tester, "app.test.npmInstall")
-      assert(installPath == tester.workspacePath / "out" / "app" / "npmInstall.dest")
+      val installPath = outputPath(tester, "app.test.bunInstall")
+      assert(installPath == tester.workspacePath / "out" / "app" / "bunInstall.dest")
     }
 
     test("bunEnv") {
@@ -274,7 +278,7 @@ object BunTypeScriptIntegrationTests extends TestSuite {
       val res = tester.eval("app.bundle")
       assert(res.isSuccess)
 
-      val installLog = os.read(tester.workspacePath / "out" / "app" / "npmInstall.dest" / ".bun-env-log")
+      val installLog = os.read(tester.workspacePath / "out" / "app" / "bunInstall.dest" / ".bun-env-log")
       val compileLog = os.read(tester.workspacePath / "out" / "app" / "compile.dest" / ".bun-env-log")
       val bundleLog = os.read(tester.workspacePath / "out" / "app" / "bundle.dest" / ".bun-env-log")
 

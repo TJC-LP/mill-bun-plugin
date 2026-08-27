@@ -94,7 +94,7 @@ trait BunScalaJSWebModule extends BunScalaJSModule:
       bunExecutable(),
       Seq("build") ++ entries.map(_.toString) ++ Seq("--minify", "--outdir", destination.toString) ++ bunBundleArgs(),
       cwd = stage,
-      env = bunEnv()
+      env = bunToolEnv()
     )
     PathRef(destination)
   }

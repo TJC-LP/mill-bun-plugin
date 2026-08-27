@@ -48,8 +48,8 @@ object BunWorkspaceIntegrationTests extends TestSuite:
       assert(!os.read(workspaceInstall / ".workspace-installed").contains("shared-local"))
 
       val scalaResult = tester.eval("scalaApp.bunInstall")
-      val typescriptResult = tester.eval("typescriptApp.npmInstall")
+      val typescriptResult = tester.eval("typescriptApp.bunInstall")
       assert(scalaResult.isSuccess)
       assert(typescriptResult.isSuccess)
       assert(os.isLink(outputPath(tester, "scalaApp.bunInstall") / "node_modules"))
-      assert(os.isLink(outputPath(tester, "typescriptApp.npmInstall") / "node_modules"))
+      assert(os.isLink(outputPath(tester, "typescriptApp.bunInstall") / "node_modules"))
