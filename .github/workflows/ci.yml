@@ -7,9 +7,14 @@ on:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        # One wrapper invocation everywhere: git-bash on the Windows runner runs ./mill too.
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
@@ -18,15 +23,26 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/mill-bun
+          key: mill-bun-${{ runner.os }}-${{ hashFiles('millbun/src/mill/bun/BunToolchainModule.scala') }}
+
+      - name: Select Mill launcher
+        # The sh wrapper fetches Mill's native launcher, which has no Windows build
+        # ("This native mill launcher supports only Linux and macOS") — Windows goes
+        # through the committed mill.bat instead.
+        run: echo "MILL=./mill$([ "$RUNNER_OS" = "Windows" ] && echo .bat)" >> "$GITHUB_ENV"
+
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
 
       - name: Compile
-        run: ./mill --no-server millbun.compile
+        run: $MILL --no-server millbun.compile
 
       - name: Unit Tests
-        run: ./mill --no-server millbun.test
+        run: $MILL --no-server millbun.test
 
       # The suite defaults to the managed toolchain; this job pins system Bun to the same
       # version so `findOnPath` resolution and version verification keep CI coverage, while
@@ -34,13 +50,17 @@ jobs:
       - name: Integration Tests
         env:
           MILL_BUN_USE_SYSTEM: 'true'
-        run: ./mill --no-server millbun.integration
+        run: $MILL --no-server millbun.integration
 
   managed-bun:
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
@@ -49,7 +69,18 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/mill-bun
+          key: mill-bun-${{ runner.os }}-${{ hashFiles('millbun/src/mill/bun/BunToolchainModule.scala') }}
+
+      - name: Select Mill launcher
+        # The sh wrapper fetches Mill's native launcher, which has no Windows build
+        # ("This native mill launcher supports only Linux and macOS") — Windows goes
+        # through the committed mill.bat instead.
+        run: echo "MILL=./mill$([ "$RUNNER_OS" = "Windows" ] && echo .bat)" >> "$GITHUB_ENV"
+
       - name: Managed Bun smoke test
         env:
           MILL_BUN_USE_SYSTEM: 'false'
-        run: ./mill --no-server millbun.integration.testOnly mill.bun.BunManagedToolchainIntegrationTests
+        run: $MILL --no-server millbun.integration.testOnly mill.bun.BunManagedToolchainIntegrationTests
