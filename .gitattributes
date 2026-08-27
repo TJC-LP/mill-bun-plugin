@@ -1,0 +1,7 @@
+# Deterministic working trees on every platform: sources check out as LF everywhere, so the
+# scalafmt CI check compares identical bytes on Windows runners (whose git defaults to
+# autocrlf=true and would otherwise rewrite all 28 Scala sources to CRLF at checkout).
+* text=auto eol=lf
+# cmd.exe mis-parses some batch constructs without CRLF, and these only ever run on Windows.
+*.bat text eol=crlf
+*.cmd text eol=crlf
