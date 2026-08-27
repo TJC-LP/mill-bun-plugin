@@ -1,0 +1,12 @@
+import scala.scalajs.js
+import scala.scalajs.js.annotation.JSImport
+
+@js.native
+@JSImport("lodash", JSImport.Default)
+object Lodash extends js.Object {
+  def capitalize(s: String): String = js.native
+}
+
+object Main extends App {
+  println(Lodash.capitalize("hello from scala.js on bun"))
+}

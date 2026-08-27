@@ -32,8 +32,10 @@ object millbun extends ScalaModule, PublishModule {
       val millScript =
         if (scala.util.Properties.isWin) BuildCtx.workspaceRoot / "mill.bat"
         else BuildCtx.workspaceRoot / "mill"
+      // No ivy2Local in the fallback: a stale mill-bun jar in ~/.ivy2/local would silently
+      // shadow the freshly published test repo whenever the pinned version goes missing there.
       val repos = Seq(publishLocalTestRepo().path.toNIO.toUri.toASCIIString) ++
-        Seq(Task.env.getOrElse("COURSIER_REPOSITORIES", "ivy2Local|central"))
+        Seq(Task.env.getOrElse("COURSIER_REPOSITORIES", "central"))
       Map(
         "MILL_EXECUTABLE_PATH" -> millScript.toString,
         "COURSIER_REPOSITORIES" -> repos.mkString("|"),
@@ -47,15 +49,13 @@ object millbun extends ScalaModule, PublishModule {
         // fixtures that deliberately test the relaxed path opt out in their own build.mill.
       )
     }
-
-    object millExecutable extends JavaModule {
-      def mvnDeps = Seq(mvn"com.lihaoyi:mill-runner-launcher_3:$millVersion")
-      def mainClass = Some("mill.launcher.MillLauncherMain")
-    }
   }
 
-  // CI injects release versions via PUBLISH_VERSION; local builds stay on SNAPSHOT.
-  def publishVersion: T[String] = Task {
+  // CI injects release versions via PUBLISH_VERSION; local builds stay on NIGHTLY.
+  // Task.Input, so switching PUBLISH_VERSION between runs re-evaluates instead of serving a
+  // stale cached version — a plain Task here silently kept the old value and poisoned
+  // publishLocalTestRepo until a manual clean.
+  def publishVersion: T[String] = Task.Input {
     Task.env.getOrElse("PUBLISH_VERSION", "0.0.0-NIGHTLY")
   }
   def pomSettings = PomSettings(
