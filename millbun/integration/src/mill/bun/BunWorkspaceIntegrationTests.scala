@@ -33,7 +33,9 @@ object BunWorkspaceIntegrationTests extends BunIntegrationSuite:
       // otherwise a rename satisfies Mill's duplicate guard while bun still sees collisions.
       assert(scalaJson("name").str == "scala-app-renamed")
       assert(scalaJson("dependencies").obj("shared-local").str == "file:./vendor/shared-local")
-      assert(os.exists(workspaceInstall / "packages" / "scala-app-renamed" / "vendor" / "shared-local" / "package.json"))
+      assert(
+        os.exists(workspaceInstall / "packages" / "scala-app-renamed" / "vendor" / "shared-local" / "package.json")
+      )
       assert(!os.read(workspaceInstall / ".workspace-installed").contains("shared-local"))
 
       val scalaResult = tester.eval("scalaApp.bunInstall")

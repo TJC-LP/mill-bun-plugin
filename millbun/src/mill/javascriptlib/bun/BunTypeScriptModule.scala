@@ -73,9 +73,9 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
   /** Ambient runtime types aligned to the configured Bun target. */
   protected def ambientTypeDeps: T[Seq[String]] = Task {
     bunBundleTarget() match {
-      case "bun" => Seq(s"@types/bun@${bunTypesVersion()}")
+      case "bun"  => Seq(s"@types/bun@${bunTypesVersion()}")
       case "node" => Seq(s"@types/node@${nodeTypesVersion()}")
-      case _ => Seq.empty
+      case _      => Seq.empty
     }
   }
 
@@ -99,7 +99,8 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
           BunToolchainModule.dependencyPairs(transitiveNpmDeps(), overrides),
           transitiveUnmanagedDeps()
         )),
-        devDependencies = ujson.Obj.from(BunToolchainModule.dependencyPairs(transitiveNpmDevDeps() ++ tsDeps(), overrides))
+        devDependencies =
+          ujson.Obj.from(BunToolchainModule.dependencyPairs(transitiveNpmDevDeps() ++ tsDeps(), overrides))
       ).cleanJson.obj.toSeq
     )
 
@@ -108,7 +109,8 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
     if optional.nonEmpty then resolved("optionalDependencies") = ujson.Obj.from(optional)
     if peers.nonEmpty then resolved("peerDependencies") = ujson.Obj.from(peers)
     if overrides.nonEmpty then
-      resolved("overrides") = ujson.Obj.from(overrides.toSeq.sortBy(_._1).map((name, value) => name -> ujson.Str(value)))
+      resolved("overrides") =
+        ujson.Obj.from(overrides.toSeq.sortBy(_._1).map((name, value) => name -> ujson.Str(value)))
 
     BunToolchainModule.mergePackageJson(resolved, bunPackageJsonExtras())
   }
@@ -217,6 +219,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
     os.copy.over(generated, sourceLock, createFolders = true)
     PathRef(sourceLock)
   }
+
   /**
    * Preserve Mill's compile sandbox preparation, but invoke TypeScript through
    * Bun instead of a Node-shebang script.
@@ -369,7 +372,8 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
    */
   def compileExecutables: T[Map[String, PathRef]] = Task {
     val targets = bunCompileTargets()
-    if (targets.isEmpty) Task.fail("bunCompileTargets is empty. Set targets like Seq(\"bun-linux-x64\", \"bun-darwin-arm64\").")
+    if (targets.isEmpty)
+      Task.fail("bunCompileTargets is empty. Set targets like Seq(\"bun-linux-x64\", \"bun-darwin-arm64\").")
 
     val compileDir = compile().path
     val buildDir = Task.dest / "workspace"

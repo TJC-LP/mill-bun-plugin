@@ -56,7 +56,8 @@ trait BunWorkspaceModule extends BunToolchainModule:
   /** Generated root and member package.json files before installation. */
   def bunWorkspaceLayout: T[PathRef] = Task {
     val packages = resolvedPackages()
-    val duplicateNames = packages.groupBy(_._1).collect { case (name, entries) if entries.size > 1 => name }.toSeq.sorted
+    val duplicateNames =
+      packages.groupBy(_._1).collect { case (name, entries) if entries.size > 1 => name }.toSeq.sorted
     if duplicateNames.nonEmpty then
       Task.fail(s"Duplicate Bun workspace package names: ${duplicateNames.mkString(", ")}")
 

@@ -38,6 +38,9 @@ jobs:
         with:
           bun-version: 1.4.0
 
+      - name: Check formatting
+        run: $MILL --no-server mill.scalalib.scalafmt.ScalafmtModule/checkFormatAll __.sources
+
       - name: Compile
         run: $MILL --no-server millbun.compile
 
