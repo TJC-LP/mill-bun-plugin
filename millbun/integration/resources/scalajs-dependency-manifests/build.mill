@@ -14,8 +14,11 @@ import mill.scalajslib.bun.*
 trait StubBunModule extends BunScalaJSModule {
   override def moduleDir = build.moduleDir
   def scalaVersion = "3.8.2"
+  def scalaJSVersion = "1.22.0"
   override def moduleKind = Task { ModuleKind.CommonJSModule }
   override def bunExecutable = Task { "stub-bun" }
+  // The stub never produces a real lockfile; the strict path is covered by real-bun fixtures.
+  override def bunRequireLockfile = Task { false }
 
   override protected def runBun(
       bunExe: String,
@@ -58,13 +61,14 @@ trait RecordingStubBunModule extends StubBunModule {
 
 object localLib extends StubBunModule {
   override def sources = Task.Sources(moduleDir / "local-lib")
-  override def bunOptionalDeps = Task { Seq("optional-local@^1.0.0") }
+  override def npmOptionalDeps = Task { Seq("optional-local@^1.0.0") }
 }
 
 object publishedLib extends StubBunModule with BunPublishModule {
   override def sources = Task.Sources(moduleDir / "published-lib")
   override def bunDevDeps = Task { Seq("dev-only@^2.0.0") }
-  override def bunOptionalDeps = Task { Seq("optional-published@^3.0.0") }
+  override def npmOptionalDeps = Task { Seq("optional-published@^3.0.0") }
+  override def npmPeerDeps = Task { Seq("peer-published@^4.0.0") }
 }
 
 object publishedDevOnlyLib extends StubBunModule with BunPublishModule {
@@ -75,13 +79,7 @@ object publishedDevOnlyLib extends StubBunModule with BunPublishModule {
 object publishedVendoredExtraLib extends RecordingStubBunModule with BunPublishModule {
   override def sources = Task.Sources(moduleDir / "published-lib")
   override def bunPublishVendoredRuntime = Task { true }
-  override def bunPackageJsonExtras = Task {
-    ujson.Obj(
-      "dependencies" -> ujson.Obj(
-        "vendored-extra" -> "^4.0.0"
-      )
-    )
-  }
+  override def npmDeps = Task { Seq("vendored-extra@^4.0.0") }
 }
 
 object appLocal extends StubBunModule {
@@ -98,13 +96,7 @@ object appPublished extends StubBunModule {
 
 object appExtrasOnly extends RecordingStubBunModule {
   override def sources = Task.Sources(moduleDir / "app-local")
-  override def bunPackageJsonExtras = Task {
-    ujson.Obj(
-      "dependencies" -> ujson.Obj(
-        "extras-only" -> "^5.0.0"
-      )
-    )
-  }
+  override def npmDeps = Task { Seq("extras-only@^5.0.0") }
 }
 
 object appVendored extends StubBunModule {

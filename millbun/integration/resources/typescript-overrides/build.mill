@@ -1,0 +1,22 @@
+//| mill-version: 1.1.5
+//| mill-jvm-version: system
+//| mvnDeps:
+//| - com.tjclp::mill-bun_mill1:0.0.0-NIGHTLY
+
+package build
+
+import mill.*
+import mill.javascriptlib.bun.*
+
+// lib and app pin different is-odd specifiers; without the override the install fails with a
+// deterministic conflict, and npmOverrides is the documented escape hatch.
+object lib extends BunTypeScriptModule {
+  override def npmDeps = Task { Seq("is-odd@^3.0.0") }
+}
+
+object app extends BunTypeScriptModule {
+  override def moduleDir = build.moduleDir
+  override def moduleDeps = Seq(lib)
+  override def npmDeps = Task { Seq("is-odd@3.0.1") }
+  override def npmOverrides = Task { Map("is-odd" -> "3.0.1") }
+}

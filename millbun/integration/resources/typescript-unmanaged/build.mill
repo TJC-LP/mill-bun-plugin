@@ -1,0 +1,16 @@
+//| mill-version: 1.1.5
+//| mill-jvm-version: system
+//| mvnDeps:
+//| - com.tjclp::mill-bun_mill1:0.0.0-NIGHTLY
+
+package build
+
+import mill.*
+import mill.javascriptlib.bun.*
+
+object app extends BunTypeScriptModule {
+  override def moduleDir = build.moduleDir
+  override def unmanagedDeps = Task.Sources(moduleDir / "local-lib")
+  // The regression this fixture guards: local packages must install against a frozen lockfile.
+  override def bunRequireLockfile = Task { true }
+}

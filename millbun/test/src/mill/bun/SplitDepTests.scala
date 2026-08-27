@@ -20,13 +20,13 @@ object SplitDepTests extends TestSuite {
     test("simple package without version") {
       val (name, version) = BunToolchainModule.splitDep("react")
       assert(name == "react")
-      assert(version.str == "")
+      assert(version.str == "latest")
     }
 
     test("scoped package without version") {
       val (name, version) = BunToolchainModule.splitDep("@types/bun")
       assert(name == "@types/bun")
-      assert(version.str == "")
+      assert(version.str == "latest")
     }
 
     test("scoped package with latest tag") {

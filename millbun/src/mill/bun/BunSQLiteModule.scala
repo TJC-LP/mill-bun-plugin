@@ -15,7 +15,7 @@ import mill.*
  * Usage:
  * {{{
  * object app extends BunTypeScriptModule with BunSQLiteModule {
- *   override def sqliteDatabases = Task { Seq(PathRef(millSourcePath / "data" / "app.db")) }
+ *   override def sqliteDatabases = Task.Sources(moduleDir / "data" / "app.db")
  * }
  * }}}
  */

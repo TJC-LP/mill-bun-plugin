@@ -2,18 +2,414 @@ package mill.bun
 
 import mill.*
 import mill.api.BuildCtx
+import java.io.{BufferedInputStream, FileInputStream, FileOutputStream}
+import java.net.URI
+import java.net.http.{HttpClient, HttpRequest, HttpResponse}
+import java.security.MessageDigest
+import java.util.zip.ZipInputStream
 
 object BunToolchainModule {
 
-  /** Parse a dependency string like "react@19.1.1" or "@types/node@22.10.9" into (name, version). */
-  def splitDep(input: String): (String, ujson.Str) = input match {
-    case s if s.startsWith("@") =>
-      val withoutAt = s.drop(1)
-      val parts = withoutAt.split("@", 2)
-      ("@" + parts(0), ujson.Str(parts.lift(1).getOrElse("")))
-    case _ =>
-      val parts = input.split("@", 2)
-      (parts(0), ujson.Str(parts.lift(1).getOrElse("")))
+  /**
+   * The Bun release this plugin is tested against and downloads by default.
+   *
+   * Referenced by `bunVersion`, by `bunTypesVersion` (`@types/bun` is published in lockstep), and
+   * by the tests, so a bump is a one-line change here rather than a hunt for literals.
+   */
+  val DefaultBunVersion = "1.4.0"
+
+  private val ModeledPackageJsonFields = Set(
+    "dependencies",
+    "devDependencies",
+    "optionalDependencies",
+    "peerDependencies",
+    "overrides",
+    "workspaces"
+  )
+
+  private[bun] final case class NpmDependency(name: String, specifier: String)
+
+  private[bun] final case class Distribution(
+      assetName: String,
+      executableName: String
+  )
+
+  /**
+   * SHA-256 for every Bun release asset this plugin can download, keyed by version then asset.
+   *
+   * Sourced from the `SHASUMS256.txt` published with each Bun release. To add a version, append a
+   * complete entry — [[bundledChecksum]] deliberately has no fallback, so a partial table fails
+   * loudly on the missing platform rather than silently skipping verification.
+   */
+  private val BundledChecksums: Map[String, Map[String, String]] = Map(
+    "1.3.14" -> Map(
+      "bun-darwin-aarch64.zip" -> "d8b96221828ad6f97ac7ac0ab7e95872341af763001e8803e8267652c2652620",
+      "bun-darwin-x64.zip" -> "4183df3374623e5bab315c547cfa0974533cd457d86b73b639f7a87974cd6633",
+      "bun-darwin-x64-baseline.zip" -> "3e35ad6f53971a9834bf9e6786e2adf72b5f1921cc9a9c5fde073d2972944076",
+      "bun-linux-aarch64.zip" -> "a27ffb63a8310375836e0d6f668ae17fa8d8d18b88c37c821c65331973a19a3b",
+      "bun-linux-aarch64-musl.zip" -> "b98e0ad3625c5c00d1d5b5ff55605c7adddbfae151861e68ade57b2d3b8703bb",
+      "bun-linux-x64.zip" -> "951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f",
+      "bun-linux-x64-baseline.zip" -> "a063908ae08b7852ca10939bbdc6ceed3ddabce8fb9402dce83d65d73b36e6c7",
+      "bun-linux-x64-musl.zip" -> "14bd9aedeebf1dba67e8def9531c89bc989ecfdf1de42e5bfcaf1b8cd9294719",
+      "bun-linux-x64-musl-baseline.zip" -> "56a7d6806cf155536c0178f0ea5fbd098e684fa509ebdb4fc0a7e19fb65382dc",
+      "bun-windows-aarch64.zip" -> "89841f5a57f2348b67ec0839b718f4bf4ea7d07c371c9ba4b77b6c790f918953",
+      "bun-windows-x64.zip" -> "0a0620930b6675d7ba440e81f4e0e00d3cfbe096c4b140d3fff02205e9e18922",
+      "bun-windows-x64-baseline.zip" -> "538f9c846355d9e847b2671bc00c47da4229a0befb24df3282b739770f3b475f"
+    ),
+    "1.4.0" -> Map(
+      "bun-darwin-aarch64.zip" -> "c669e97f6164e1c96e0701748db98dfa77492908cbd8394c7557134a735de381",
+      "bun-darwin-x64.zip" -> "1d0211b8f1dc991182344687ad15e72ee86f154845a5f7fa477994cd341dd9b0",
+      "bun-darwin-x64-baseline.zip" -> "da9b9f1b4ba766c6f299711f38dfaa98623e1ed9c40896aa53db803c52ec1fa0",
+      "bun-linux-aarch64.zip" -> "4b1a332ee861983eb93bcfe6f770fff94e3e31b2c388bdaea3c8ed35e58eed0e",
+      "bun-linux-aarch64-musl.zip" -> "576300ce33ff16ffcd455bf178c2f095f9df845c6cc3d0284ba1c96ca0e80473",
+      "bun-linux-x64.zip" -> "2d03fb5fb83ac8b567aca0a281b2ce1a1a19d488f56c2968d88c3f25e92fe452",
+      "bun-linux-x64-baseline.zip" -> "184fb4595f0d401a217cf7c78c1bc430ba83314dab7a8b94805babbf7fa7097f",
+      "bun-linux-x64-musl.zip" -> "83b5f12fd258dd8d4fdcaea65ede954366aa717dab399e20093ecab280d54e7a",
+      "bun-linux-x64-musl-baseline.zip" -> "618c4bc1f94b02337ee210003c0b7c066f11548a8cdc5109df10db043dc47ca2",
+      "bun-windows-aarch64.zip" -> "f473bfe2df73ee770548c93dd5d380aea7120c218ec2aa1afdd0bbba7bf18c47",
+      "bun-windows-x64.zip" -> "e6f093d39da486b20262ca8cdd5ed6a9e8bc9c2f275b78e6d3a0c5b28cc95901",
+      "bun-windows-x64-baseline.zip" -> "b929c54a9badb104a16dedd23aab6152c86793ae653d4e6b13983ffd0c882a66"
+    )
+  )
+
+  /** Versions with a complete bundled checksum table, for diagnostics. */
+  private[bun] def bundledVersions: Seq[String] = BundledChecksums.keys.toSeq.sorted
+
+  /** Highest `lockfileVersion` each bundled Bun can read. 1.4.0 writes v2; 1.3.14 fails on v2. */
+  private val SupportedLockfileVersions: Map[String, Int] = Map(
+    "1.3.14" -> 1,
+    "1.4.0" -> 2
+  )
+
+  private[bun] def supportedLockfileVersion(bunVersion: String): Option[Int] =
+    SupportedLockfileVersions.get(bunVersion)
+
+  /** bun.lock is JSONC (trailing commas), so extract the version lexically rather than parsing. */
+  private[bun] def lockfileVersion(lockText: String): Option[Int] =
+    """"lockfileVersion"\s*:\s*(\d+)""".r.findFirstMatchIn(lockText).map(_.group(1).toInt)
+
+  /** Error text when the committed lock was written by a newer Bun; None when readable. */
+  private[bun] def lockfileSkewError(
+      lockText: String,
+      lockPath: os.Path,
+      pinnedBunVersion: String
+  ): Option[String] =
+    for {
+      version <- lockfileVersion(lockText)
+      supported <- supportedLockfileVersion(pinnedBunVersion)
+      if version > supported
+    } yield s"$lockPath has lockfileVersion $version, which Bun $pinnedBunVersion cannot read " +
+      s"(it supports up to $supported). Regenerate the lockfile with this module's bunLock " +
+      "command, or raise bunVersion."
+
+  /**
+   * Compose a Bun release asset name from the platform axes.
+   *
+   * Bun names assets `bun-{os}-{arch}[-musl][-baseline].zip`. The two modifiers are constrained:
+   * `-musl` exists only for Linux, and `-baseline` (for x64 CPUs without AVX2) only for x64. This
+   * returns `Left` for combinations Bun does not publish rather than constructing a 404 URL.
+   */
+  private[bun] def distribution(
+      osName: String,
+      architecture: String,
+      musl: Boolean = false,
+      baseline: Boolean = false
+  ): Either[String, Distribution] = {
+    val osPart = osName.toLowerCase match {
+      case name if name.contains("mac") || name.contains("darwin") => Right("darwin")
+      case name if name.contains("linux")                          => Right("linux")
+      case name if name.contains("windows")                        => Right("windows")
+      case other => Left(s"Unsupported operating system '$other'")
+    }
+    val archPart = architecture.toLowerCase match {
+      case "aarch64" | "arm64"        => Right("aarch64")
+      case "amd64" | "x86_64" | "x64" => Right("x64")
+      case other                      => Left(s"Unsupported architecture '$other'")
+    }
+
+    for {
+      os <- osPart
+      arch <- archPart
+      _ <-
+        if (musl && os != "linux") Left(s"Bun publishes no musl build for '$os'")
+        else Right(())
+      _ <-
+        if (baseline && arch != "x64") Left(s"Bun publishes no baseline build for '$arch'")
+        else Right(())
+    } yield Distribution(
+      assetName = s"bun-$os-$arch${if (musl) "-musl" else ""}${if (baseline) "-baseline" else ""}.zip",
+      executableName = if (os == "windows") "bun.exe" else "bun"
+    )
+  }
+
+  /**
+   * Detect a musl-based Linux (Alpine and friends), where the glibc build cannot run.
+   *
+   * Probing for the musl dynamic loader is more reliable than parsing `ldd --version`, which musl
+   * writes to stderr and glibc to stdout.
+   */
+  private[bun] def detectMusl(root: os.Path = os.root): Boolean =
+    try
+      val libDir = root / "lib"
+      (os.exists(libDir) && os.list(libDir).exists(p => p.last.startsWith("ld-musl-"))) ||
+      os.exists(root / "etc" / "alpine-release")
+    catch case _: Exception => false
+
+  private[bun] def bundledChecksum(version: String, assetName: String): Option[String] =
+    BundledChecksums.get(version).flatMap(_.get(assetName))
+
+  private[bun] def sha256(path: os.Path): String = {
+    val digest = MessageDigest.getInstance("SHA-256")
+    val stream = new BufferedInputStream(new FileInputStream(path.toIO))
+    val buffer = new Array[Byte](64 * 1024)
+    try {
+      var read = stream.read(buffer)
+      while (read >= 0) {
+        if (read > 0) digest.update(buffer, 0, read)
+        read = stream.read(buffer)
+      }
+    } finally stream.close()
+    digest.digest().map(byte => f"${byte & 0xff}%02x").mkString
+  }
+
+  private[bun] def download(url: String, destination: os.Path): Unit = {
+    os.makeDir.all(destination / os.up)
+    val client = HttpClient.newBuilder()
+      .followRedirects(HttpClient.Redirect.ALWAYS)
+      .build()
+    val request = HttpRequest.newBuilder(URI.create(url))
+      .header("User-Agent", "mill-bun-plugin")
+      .GET()
+      .build()
+    val response = client.send(request, HttpResponse.BodyHandlers.ofFile(destination.toNIO))
+    if (response.statusCode() / 100 != 2) {
+      throw new RuntimeException(s"Unable to download Bun from $url: HTTP ${response.statusCode()}")
+    }
+  }
+
+  private[bun] def extractExecutable(
+      archive: os.Path,
+      executableName: String,
+      destination: os.Path
+  ): Unit = {
+    val zip = new ZipInputStream(new BufferedInputStream(new FileInputStream(archive.toIO)))
+    var found = false
+    try {
+      var entry = zip.getNextEntry
+      while (entry != null) {
+        val entryName = entry.getName.replace('\\', '/')
+        if (!entry.isDirectory && entryName.split('/').lastOption.contains(executableName)) {
+          os.makeDir.all(destination / os.up)
+          val output = new FileOutputStream(destination.toIO)
+          try zip.transferTo(output)
+          finally output.close()
+          found = true
+        }
+        zip.closeEntry()
+        entry = zip.getNextEntry
+      }
+    } finally zip.close()
+
+    if (!found) throw new RuntimeException(s"Bun archive does not contain $executableName")
+    if (executableName != "bun.exe" && !destination.toIO.setExecutable(true)) {
+      throw new RuntimeException(s"Unable to make downloaded Bun executable: $destination")
+    }
+  }
+
+  /**
+   * Move a verified executable into the shared cache, tolerating a concurrent writer.
+   *
+   * Mill evaluates modules in parallel, so two tasks can extract the same archive at once. Both
+   * move into the same destination; whoever loses the race simply uses the winner's file, which is
+   * byte-identical because the path is keyed by checksum.
+   */
+  private[bun] def publishToCache(staged: os.Path, cached: os.Path): os.Path = {
+    os.makeDir.all(cached / os.up)
+    try
+      java.nio.file.Files.move(
+        staged.toNIO,
+        cached.toNIO,
+        java.nio.file.StandardCopyOption.ATOMIC_MOVE
+      )
+      cached
+    catch
+      case _: java.nio.file.AtomicMoveNotSupportedException => publishViaCopy(staged, cached)
+      case scala.util.control.NonFatal(_) if os.exists(cached) =>
+        // Lost the publish race. The path is keyed by the verified checksum, so the winner's
+        // bytes are the right bytes. Windows reports this as a sharing violation rather than
+        // FileAlreadyExistsException, so match on the outcome, not the exception type.
+        cached
+  }
+
+  /**
+   * Publish across filesystems by staging a copy next to the final path, so the last hop is a
+   * same-filesystem atomic rename. Copying straight to the published name would let a concurrent
+   * reader execute a partially written binary — and a build killed mid-copy would leave a
+   * truncated file that every later build trusts, because the path is the checksum.
+   */
+  private[bun] def publishViaCopy(staged: os.Path, cached: os.Path): os.Path = {
+    val tmp = cached / os.up /
+      s"${cached.last}.tmp-${ProcessHandle.current().pid()}-${System.nanoTime()}"
+    os.copy(staged, tmp, copyAttributes = true, createFolders = true)
+    try
+      java.nio.file.Files.move(
+        tmp.toNIO,
+        cached.toNIO,
+        java.nio.file.StandardCopyOption.ATOMIC_MOVE
+      )
+    catch
+      case scala.util.control.NonFatal(_) if os.exists(cached) => os.remove.all(tmp)
+    cached
+  }
+
+  /**
+   * A `PathRef` into the shared download cache.
+   *
+   * The file lives outside every `Task.dest`, so Mill must re-check it each evaluation: entries
+   * are immutable but evictable, and without revalidation an evicted executable is never
+   * re-downloaded — every bun invocation fails until the user guesses the right `clean`. Quick
+   * (mtime + size) signatures keep the per-evaluation cost to a stat.
+   */
+  private[bun] def cachedExecutableRef(cached: os.Path): PathRef =
+    PathRef(cached, quick = true).withRevalidate(PathRef.Revalidate.Always)
+
+  /** Parse package.json-style `name@specifier` declarations without slicing scoped names incorrectly. */
+  private[bun] def parseDependency(input: String): Either[String, NpmDependency] = {
+    val trimmed = input.trim
+    if (trimmed.isEmpty) Left("Dependency cannot be empty")
+    else if (trimmed.startsWith("@")) {
+      val slash = trimmed.indexOf('/')
+      if (slash <= 1 || slash == trimmed.length - 1) Left(s"Invalid scoped dependency '$input'")
+      else {
+        val separator = trimmed.indexOf('@', slash + 1)
+        val name = if (separator < 0) trimmed else trimmed.take(separator)
+        val specifier = if (separator < 0) "latest" else trimmed.drop(separator + 1)
+        if (specifier.isEmpty) Left(s"Dependency '$input' has an empty specifier")
+        else Right(NpmDependency(name, specifier))
+      }
+    } else {
+      val separator = trimmed.indexOf('@')
+      val name = if (separator < 0) trimmed else trimmed.take(separator)
+      val specifier = if (separator < 0) "latest" else trimmed.drop(separator + 1)
+      if (name.isEmpty) Left(s"Dependency '$input' has an empty name")
+      else if (specifier.isEmpty) Left(s"Dependency '$input' has an empty specifier")
+      else Right(NpmDependency(name, specifier))
+    }
+  }
+
+  /** Parse a dependency for compatibility with the existing public helper. */
+  def splitDep(input: String): (String, ujson.Str) =
+    parseDependency(input) match {
+      case Right(dep) => dep.name -> ujson.Str(dep.specifier)
+      case Left(message) => throw new IllegalArgumentException(message)
+    }
+
+  /** Resolve duplicate declarations deterministically and fail conflicting specs unless overridden. */
+  def dependencyPairs(
+      inputs: Seq[String],
+      overrides: Map[String, String] = Map.empty
+  ): Seq[(String, ujson.Str)] = {
+    val parsed = inputs.map(input => parseDependency(input).fold(
+      message => throw new IllegalArgumentException(message),
+      identity
+    ))
+    parsed.groupBy(_.name).toSeq.sortBy(_._1).map { case (name, entries) =>
+      val specifiers = entries.map(_.specifier).distinct
+      val resolved = overrides.get(name).orElse(specifiers match {
+        case Seq(specifier) => Some(specifier)
+        case _ => None
+      }).getOrElse(
+        throw new IllegalArgumentException(
+          s"Conflicting npm dependency '$name': ${specifiers.sorted.mkString(", ")}. " +
+            "Declare npmOverrides to select one specifier."
+        )
+      )
+      name -> ujson.Str(resolved)
+    }
+  }
+
+  /**
+   * npm dependency pairs plus `file:` pairs for local (unmanaged) packages.
+   *
+   * Local paths must arrive through the generated package.json, never as positional
+   * `bun install` arguments: a positional path turns the invocation into `bun add`, which
+   * `--frozen-lockfile` unconditionally rejects — so unmanaged deps could never install against
+   * a lockfile at all. The specifier points under `vendor/` beside the package.json (staged by
+   * [[stageUnmanagedDeps]]), so the recorded lock entry (`file:vendor/<name>`) is independent
+   * of where the repository is checked out.
+   */
+  private[mill] def dependencyPairsWithUnmanaged(
+      npm: Seq[(String, ujson.Str)],
+      unmanaged: Seq[PathRef]
+  ): Seq[(String, ujson.Str)] = {
+    val filePairs = unmanagedDependencyPairs(unmanaged)
+    val collisions = npm.map(_._1).toSet.intersect(filePairs.map(_._1).toSet).toSeq.sorted
+    if (collisions.nonEmpty) {
+      throw new IllegalArgumentException(
+        s"Declared both as an npm dependency and in unmanagedDeps: ${collisions.mkString(", ")}. " +
+          "A package can be resolved from the registry or from a local directory, not both."
+      )
+    }
+    npm ++ filePairs
+  }
+
+  private[bun] def unmanagedDependencyPairs(deps: Seq[PathRef]): Seq[(String, ujson.Str)] = {
+    val named = deps.map(_.path).distinct.map(path => unmanagedPackageName(path) -> path)
+    val duplicates = named.groupBy(_._1).collect {
+      case (name, entries) if entries.map(_._2).distinct.size > 1 =>
+        s"$name (${entries.map(_._2).distinct.mkString(", ")})"
+    }.toSeq.sorted
+    if (duplicates.nonEmpty) {
+      throw new IllegalArgumentException(
+        s"Multiple unmanagedDeps declare the same package name: ${duplicates.mkString("; ")}."
+      )
+    }
+    named.distinctBy(_._1).sortBy(_._1).map { case (name, _) =>
+      name -> ujson.Str(s"file:./vendor/${vendorDirectoryName(name)}")
+    }
+  }
+
+  private[bun] def unmanagedPackageName(source: os.Path): String = {
+    if (!os.isDir(source)) {
+      throw new IllegalArgumentException(
+        s"Unmanaged Bun dependency $source is not a directory. Point unmanagedDeps at unpacked " +
+          "package directories containing a package.json."
+      )
+    }
+    val packageJson = source / "package.json"
+    if (!os.exists(packageJson)) {
+      throw new IllegalArgumentException(s"Unmanaged Bun dependency $source has no package.json.")
+    }
+    ujson.read(os.read(packageJson)).obj.get("name") match {
+      case Some(ujson.Str(name)) if name.nonEmpty => name
+      case _ =>
+        throw new IllegalArgumentException(s"$packageJson does not declare a package name.")
+    }
+  }
+
+  /** Scoped names need one path segment: `@scope/pkg` becomes `scope+pkg`, as in Bun workspaces. */
+  private[bun] def vendorDirectoryName(name: String): String =
+    name.stripPrefix("@").replace('/', '+')
+
+  /** Copy each unmanaged package into `vendor/` beside the generated package.json. */
+  private[mill] def stageUnmanagedDeps(deps: Seq[PathRef], installRoot: os.Path): Unit =
+    deps.map(_.path).distinct.foreach { source =>
+      val name = unmanagedPackageName(source)
+      // A local package's own node_modules is development debris; bun resolves the package's
+      // declared dependencies through the lockfile instead.
+      copyTree(source, installRoot / "vendor" / vendorDirectoryName(name), exclude = Set("node_modules"))
+    }
+
+  /** Add unmodeled package.json fields without allowing typed dependency data to be replaced. */
+  def mergePackageJson(base: ujson.Obj, extras: ujson.Obj): ujson.Obj = {
+    val conflicts = extras.value.keySet.intersect(ModeledPackageJsonFields).toSeq.sorted
+    if (conflicts.nonEmpty) {
+      throw new IllegalArgumentException(
+        s"bunPackageJsonExtras cannot replace modeled fields: ${conflicts.mkString(", ")}. " +
+          "Use npmDeps, npmDevDeps, npmOptionalDeps, npmPeerDeps, or npmOverrides."
+      )
+    }
+    ujson.Obj.from(base.value.toSeq ++ extras.value.toSeq)
   }
 
   /** Build candidate executable names from a base name and PATHEXT extensions.
@@ -30,15 +426,49 @@ object BunToolchainModule {
     val candidates = executableCandidates(name, sys.env.getOrElse("PATHEXT", ""))
 
     pathDirs.iterator
+      .filter(_.nonEmpty)
       .flatMap(dir => candidates.iterator.map(c => os.Path(dir) / c))
-      .find(os.exists(_))
+      .find(path => os.isFile(path) && java.nio.file.Files.isExecutable(path.toNIO))
   }
 
-  /** Copy a generated workspace into a fresh task destination, preserving layout. */
-  def copyWorkspace(source: os.Path, dest: os.Path): Unit = {
-    os.walk(source)
-      .foreach(path => os.copy.over(path, dest / path.relativeTo(source), createFolders = true))
+  /**
+   * Copy a directory tree, recreating symlinks instead of resolving them.
+   *
+   * `os.walk` does not follow links, but `os.isDir` and `os.copy` do. Branching on one while
+   * copying with the other means a `node_modules` symlink is either deep-copied (turning an O(1)
+   * link into an O(node_modules) copy) or flattened into an empty directory, and a broken link
+   * anywhere in the tree — routine for the `.bin` shims of skipped optional dependencies — aborts
+   * the whole copy. Recreating the link is both correct and cheap.
+   *
+   * @param exclude top-level entry names to skip entirely
+   */
+  def copyTree(source: os.Path, dest: os.Path, exclude: Set[String] = Set.empty): Unit = {
+    if (!os.exists(source, followLinks = false)) return
+
+    val skip = (path: os.Path) => {
+      val relative = path.relativeTo(source)
+      relative.segments.headOption.exists(exclude.contains)
+    }
+
+    os.walk(source, skip = skip, followLinks = false).foreach { path =>
+      val target = dest / path.relativeTo(source)
+      if (os.isLink(path)) {
+        os.makeDir.all(target / os.up)
+        if (os.exists(target, followLinks = false)) os.remove(target)
+        // Preserve the raw target: absolutizing a tree-internal relative link (bun's
+        // node_modules/.bin entries) would point the copy back into the source tree, so the
+        // copy stops being self-contained the moment the source is cleaned or relocated.
+        os.symlink(target, os.readLink(path))
+      } else if (os.isDir(path, followLinks = false)) {
+        os.makeDir.all(target)
+      } else {
+        os.copy.over(path, target, createFolders = true)
+      }
+    }
   }
+
+  /** Copy a generated workspace into a fresh task destination, preserving layout and symlinks. */
+  def copyWorkspace(source: os.Path, dest: os.Path): Unit = copyTree(source, dest)
 
   /**
    * Copy files or directories into a Bun workspace while preserving their relative path
@@ -57,36 +487,164 @@ object BunToolchainModule {
           .map(root => destRoot / source.relativeTo(root))
           .getOrElse(destRoot / source.last)
 
-      if (os.isDir(source)) {
-        os.walk(source).foreach { path =>
-          os.copy.over(path, target / path.relativeTo(source), createFolders = true)
-        }
-      } else {
-        os.copy.over(source, target, createFolders = true)
-      }
+      if (os.isDir(source)) copyTree(source, target)
+      else os.copy.over(source, target, createFolders = true)
     }
   }
 }
 
 trait BunToolchainModule extends Module {
 
+  /** Tested Bun release downloaded by default when no override is configured. */
+  def bunVersion: T[String] = Task { BunToolchainModule.DefaultBunVersion }
+
+  /**
+   * Download the `-baseline` build, for x64 CPUs without AVX2.
+   *
+   * Not auto-detected: the JVM cannot see CPU feature flags, and guessing wrong surfaces as an
+   * illegal-instruction crash rather than a diagnosable error. Set this when Bun aborts on startup
+   * with `SIGILL` on older x64 hardware.
+   */
+  def bunUseBaseline: T[Boolean] = Task { false }
+
+  /**
+   * Download the musl build, required on Alpine and other musl-based Linux distributions.
+   *
+   * Auto-detected from the presence of the musl dynamic loader; override to force either build.
+   */
+  def bunUseMusl: T[Boolean] = Task.Input { BunToolchainModule.detectMusl() }
+
+  /** Resolve Bun from PATH instead of using the managed distribution. */
+  // Task.Input: a plain Task caches the first-seen env value until a manual clean, so toggling
+  // MILL_BUN_USE_SYSTEM between runs — the documented workflow — would be silently ignored.
+  def bunUseSystem: T[Boolean] = Task.Input {
+    Task.env.get("MILL_BUN_USE_SYSTEM").exists(_.equalsIgnoreCase("true"))
+  }
+
   /** Command name used when resolving Bun from PATH. */
   def bunExecutableName: T[String] = Task { "bun" }
 
-  /** Future hook for a managed/downloaded Bun binary. */
+  /** Explicit Bun binary override. */
+  def bunExecutableOverride: T[Option[PathRef]] = Task { None }
+
+  /** @deprecated Use [[bunExecutableOverride]]. */
+  @deprecated("Use bunExecutableOverride", "0.3.0")
   def managedBunExecutable: T[Option[PathRef]] = Task { None }
+
+  /** Optional managed distribution mirror. Must be paired with [[bunArchiveSha256]]. */
+  def bunArchiveUrl: T[Option[String]] = Task { None }
+
+  /**
+   * SHA-256 of the Bun archive to download.
+   *
+   * Set this alone to run a [[bunVersion]] with no bundled checksum — the URL is derived from the
+   * version and the detected platform. Set it together with [[bunArchiveUrl]] to use a mirror.
+   */
+  def bunArchiveSha256: T[Option[String]] = Task { None }
+
+  /**
+   * Directory holding managed Bun downloads, shared by every module in the build.
+   *
+   * `downloadedBunExecutable` is a task on this trait, so without a shared cache a build with N
+   * Bun modules downloads the ~35 MB archive N times into N separate `Task.dest` directories.
+   * Entries are keyed by the archive's verified SHA-256, so a partial or tampered download can
+   * never be reused and two modules on the same pin share one file.
+   *
+   * Lives outside the workspace, so Mill's filesystem checker does not restrict it.
+   */
+  def bunDownloadCacheDir: T[os.Path] = Task.Input {
+    Task.env.get("MILL_BUN_CACHE_DIR").filter(_.nonEmpty)
+      .map(os.Path(_, BuildCtx.workspaceRoot))
+      .getOrElse(os.home / ".cache" / "mill-bun")
+  }
+
+  /** Verify that an override/system executable matches [[bunVersion]]. */
+  def bunVerifyVersion: T[Boolean] = Task { true }
 
   /** Environment passed to Bun subprocesses. */
   def bunEnv: T[Map[String, String]] = Task { Map.empty }
 
+  /** Environment for Bun toolchain subprocesses: install, lock, build, and bundle. */
+  def bunToolEnv: T[Map[String, String]] = Task { bunEnv() }
+
+  /** Explicit resolutions for conflicting transitive npm dependency declarations. */
+  def npmOverrides: T[Map[String, String]] = Task { Map.empty }
+
   /** Lockfile names that Bun may produce. */
   def bunLockfiles: T[Seq[String]] = Task { Seq("bun.lock", "bun.lockb") }
+
+  /** Source-controlled text lockfile for this module. */
+  def bunLockfile: T[Option[PathRef]] = Task.Input {
+    val path = moduleDir / "bun.lock"
+    if (os.exists(path)) Some(PathRef(path)) else None
+  }
+
+  /** Require dependency-bearing modules to provide [[bunLockfile]]. */
+  // Task.Input for the same reason as bunUseSystem: MIGRATING-0.3 tells users mid-migration to
+  // set MILL_BUN_REQUIRE_LOCKFILE=false, which must take effect on a warm out/ directory.
+  def bunRequireLockfile: T[Boolean] = Task.Input {
+    !Task.env.get("MILL_BUN_REQUIRE_LOCKFILE").exists(_.equalsIgnoreCase("false"))
+  }
 
   /** Hoisted installs are the safest default for Node-compatible resolution. */
   def bunLinker: T[String] = Task { "hoisted" }
 
   def bunInstallArgs: T[Seq[String]] = Task {
     Seq("--save-text-lockfile", "--linker", bunLinker())
+  }
+
+  /** Additional install flags. Lockfile safety flags are controlled by the plugin. */
+  def bunInstallExtraArgs: T[Seq[String]] = Task { Seq.empty }
+
+  protected def copyBunLockfile(lockfile: Option[PathRef], destination: os.Path): Unit =
+    lockfile.foreach(ref => os.copy.over(ref.path, destination / "bun.lock", createFolders = true))
+
+  protected def resolvedBunInstallArgs(
+      baseArgs: Seq[String],
+      extraArgs: Seq[String],
+      hasLockfile: Boolean,
+      updateLockfile: Boolean
+  ): Seq[String] = {
+    val protectedPrefixes = Seq(
+      "--no-save",
+      "--lockfile",
+      "--frozen-lockfile",
+      "--save-text-lockfile"
+    )
+    val forbidden = extraArgs.filter(arg => protectedPrefixes.exists(arg.startsWith))
+    if (forbidden.nonEmpty) {
+      throw new IllegalArgumentException(
+        s"bunInstallExtraArgs cannot override lockfile safety: ${forbidden.mkString(", ")}"
+      )
+    }
+    baseArgs ++ extraArgs ++
+      (if (updateLockfile) Seq("--lockfile-only")
+       else if (hasLockfile) Seq("--frozen-lockfile")
+       else Seq.empty)
+  }
+
+  /**
+   * @param lockfilePath where the missing lockfile is expected. Nested modules must pass their own
+   *                     path, or the error points a user at the wrong file.
+   */
+  protected def requireBunLockfile(
+      hasInstallInputs: Boolean,
+      lockfile: Option[PathRef],
+      required: Boolean,
+      pinnedBunVersion: String,
+      lockfilePath: os.Path = moduleDir / "bun.lock"
+  ): Unit = {
+    if (hasInstallInputs && required && lockfile.isEmpty) {
+      throw new RuntimeException(
+        s"Missing $lockfilePath. Run this module's bunLock command and commit the generated lockfile."
+      )
+    }
+    // bun.lock is forward- but not backward-compatible: a lock written by a newer Bun makes an
+    // older one fail with a raw UnknownLockfileVersion that never mentions how to recover.
+    lockfile.foreach { lock =>
+      BunToolchainModule.lockfileSkewError(os.read(lock.path), lock.path, pinnedBunVersion)
+        .foreach(message => throw new RuntimeException(message))
+    }
   }
 
   /**
@@ -118,14 +676,117 @@ trait BunToolchainModule extends Module {
    */
   def bunCompileResources: T[Seq[PathRef]] = Task { Seq.empty }
 
-  /** Resolve Bun either from a managed binary or from PATH. */
-  def bunExecutable: T[String] = Task {
-    managedBunExecutable()
-      .map(_.path.toString)
-      .orElse(BunToolchainModule.findOnPath(bunExecutableName()).map(_.toString))
+  private def downloadedBunExecutable: T[PathRef] = Task {
+    val version = bunVersion()
+    val dist = BunToolchainModule.distribution(
+      System.getProperty("os.name", "unknown"),
+      System.getProperty("os.arch", "unknown"),
+      musl = bunUseMusl(),
+      baseline = bunUseBaseline()
+    ).fold(
+      message => Task.fail(s"$message. Set bunExecutableOverride or bunUseSystem."),
+      identity
+    )
+    val customUrl = bunArchiveUrl()
+    val customChecksum = bunArchiveSha256()
+    if (customUrl.isDefined && customChecksum.isEmpty) {
+      Task.fail("bunArchiveUrl requires bunArchiveSha256 so the mirrored archive stays verified.")
+    }
+    val url = customUrl.getOrElse(
+      s"https://github.com/oven-sh/bun/releases/download/bun-v$version/${dist.assetName}"
+    )
+    val checksum = customChecksum
+      .orElse(BunToolchainModule.bundledChecksum(version, dist.assetName))
       .getOrElse(Task.fail(
-        s"Unable to find Bun executable '${bunExecutableName()}'. Put Bun on PATH or override managedBunExecutable."
+        s"No bundled checksum for Bun $version (${dist.assetName}). " +
+          s"Bundled versions are ${BunToolchainModule.bundledVersions.mkString(", ")}. " +
+          "Set bunArchiveSha256 to the archive's SHA-256 to use this version anyway."
       ))
+      .toLowerCase
+
+    if (!checksum.matches("[0-9a-f]{64}")) {
+      Task.fail(s"bunArchiveSha256 must be 64 hexadecimal characters, received '$checksum'.")
+    }
+
+    // Keyed by the verified checksum, so a cache hit is proof of the right bytes.
+    val cached = bunDownloadCacheDir() / checksum / dist.executableName
+    if (os.exists(cached)) BunToolchainModule.cachedExecutableRef(cached)
+    else {
+      val archive = Task.dest / dist.assetName
+      val staged = Task.dest / dist.executableName
+      BunToolchainModule.download(url, archive)
+      val actual = BunToolchainModule.sha256(archive)
+      if (actual != checksum) {
+        Task.fail(s"Bun archive checksum mismatch for $url: expected $checksum, received $actual")
+      }
+      BunToolchainModule.extractExecutable(archive, dist.executableName, staged)
+      BunToolchainModule.cachedExecutableRef(BunToolchainModule.publishToCache(staged, cached))
+    }
+  }
+
+  private def verifyBunVersion(executable: String, expected: String, verify: Boolean): Unit = {
+    if (verify) {
+      val result = os.proc(executable, "--version").call(
+        check = false,
+        stdout = os.Pipe,
+        stderr = os.Pipe
+      )
+      val actual = result.out.text().trim
+      if (result.exitCode != 0 || actual != expected) {
+        throw new RuntimeException(
+          s"Bun version mismatch for '$executable': expected $expected, received " +
+            (if (actual.nonEmpty) actual else s"exit code ${result.exitCode}")
+        )
+      }
+    }
+  }
+
+  /** Resolve Bun from an explicit override, PATH opt-in, or the managed distribution. */
+  def bunExecutable: T[String] = Task {
+    val explicit = bunExecutableOverride().orElse(managedBunExecutable()).map(_.path.toString)
+    val resolved = explicit.orElse {
+      if (bunUseSystem()) {
+        BunToolchainModule.findOnPath(bunExecutableName()).map(_.toString).orElse(
+          Some(Task.fail(
+            s"Unable to find Bun executable '${bunExecutableName()}' on PATH. " +
+              "Disable bunUseSystem to use managed Bun, or set bunExecutableOverride."
+          ))
+        )
+      } else Some(downloadedBunExecutable().path.toString)
+    }.get
+    verifyBunVersion(resolved, bunVersion(), bunVerifyVersion())
+    resolved
+  }
+
+  /** Print and validate the resolved Bun toolchain. */
+  def bunDoctor(): Command[Unit] = Task.Command {
+    val executable = bunExecutable()
+    val revision = os.proc(executable, "--revision").call(
+      check = false,
+      stdout = os.Pipe,
+      stderr = os.Pipe
+    ).out.text().trim
+    val mode =
+      if (bunExecutableOverride().orElse(managedBunExecutable()).nonEmpty) "override"
+      else if (bunUseSystem()) "system"
+      else "managed"
+    println(s"Bun mode: $mode")
+    println(s"Bun executable: $executable")
+    println(s"Bun version: ${bunVersion()}")
+    if (revision.nonEmpty) println(s"Bun revision: $revision")
+    println(s"Bun linker: ${bunLinker()}")
+    if (mode == "managed") {
+      val dist = BunToolchainModule.distribution(
+        System.getProperty("os.name", "unknown"),
+        System.getProperty("os.arch", "unknown"),
+        musl = bunUseMusl(),
+        baseline = bunUseBaseline()
+      )
+      println(s"Bun asset: ${dist.fold(identity, _.assetName)}")
+      println(s"Bun libc: ${if (bunUseMusl()) "musl" else "glibc"}")
+      println(s"Bun baseline: ${bunUseBaseline()}")
+    }
+    println(s"Bun lockfile: ${bunLockfile().fold("none")(_.path.toString)}")
   }
 
   /** Run a Bun command. All task values must be resolved before calling this. */

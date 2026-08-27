@@ -1,39 +1,27 @@
 //| mill-version: 1.1.5
 //| mill-jvm-version: system
 //| mvnDeps:
-//| - com.tjclp::mill-bun_mill1:0.2.1
+//| - com.tjclp::mill-bun_mill1:0.3.0
 
 package build
 
 import mill.*
+import mill.scalalib.*
 import mill.scalajslib.*
 import mill.scalajslib.api.*
 import mill.scalajslib.bun.*
+import mill.bun.bun
 
 object app extends BunScalaJSModule {
   override def moduleDir = build.moduleDir
   def scalaVersion = "3.8.2"
-
-  def mvnDeps = Seq(
-    mvn"org.scala-js::scalajs-dom::2.8.1"
-  )
+  def scalaJSVersion = "1.22.0"
 
   override def moduleKind = Task { ModuleKind.ESModule }
-
-  // Example JSImport-backed package.
-  override def npmDeps = Task {
-    Seq(
-      "react@19.1.1",
-      "react-dom@19.1.1"
-    )
-  }
-
-  override def bunBundleTarget = Task { "browser" }
+  override def npmDeps = Task { Seq(bun"lodash@^4.17.21") }
 
   object test extends BunScalaJSTests, TestModule.Utest {
-    def mvnDeps = Seq(
-      mvn"com.lihaoyi::utest:0.8.5"
-    )
+    def mvnDeps = Seq(mvn"com.lihaoyi::utest::0.8.5")
     def testFramework = "utest.runner.Framework"
   }
 }

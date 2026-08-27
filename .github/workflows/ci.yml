@@ -3,14 +3,18 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        # One wrapper invocation everywhere: git-bash on the Windows runner runs ./mill too.
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
@@ -19,15 +23,98 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/mill-bun
+          key: mill-bun-${{ runner.os }}-${{ hashFiles('millbun/src/mill/bun/BunToolchainModule.scala') }}
+
+      - name: Select Mill launcher
+        # The sh wrapper fetches Mill's native launcher, which has no Windows build
+        # ("This native mill launcher supports only Linux and macOS") — Windows goes
+        # through the committed mill.bat instead.
+        run: echo "MILL=./mill$([ "$RUNNER_OS" = "Windows" ] && echo .bat)" >> "$GITHUB_ENV"
+
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.4.0
 
       - name: Compile
-        run: ./mill millbun.compile
+        run: $MILL --no-server millbun.compile
 
       - name: Unit Tests
-        run: ./mill millbun.test
+        run: $MILL --no-server millbun.test
 
+      # The suite defaults to the managed toolchain; this job pins system Bun to the same
+      # version so `findOnPath` resolution and version verification keep CI coverage, while
+      # the managed-bun job covers the download/cache path.
       - name: Integration Tests
-        run: ./mill millbun.integration
+        env:
+          MILL_BUN_USE_SYSTEM: 'true'
+        run: $MILL --no-server millbun.integration
+
+  managed-bun:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/mill-bun
+          key: mill-bun-${{ runner.os }}-${{ hashFiles('millbun/src/mill/bun/BunToolchainModule.scala') }}
+
+      - name: Select Mill launcher
+        # The sh wrapper fetches Mill's native launcher, which has no Windows build
+        # ("This native mill launcher supports only Linux and macOS") — Windows goes
+        # through the committed mill.bat instead.
+        run: echo "MILL=./mill$([ "$RUNNER_OS" = "Windows" ] && echo .bat)" >> "$GITHUB_ENV"
+
+      - name: Managed Bun smoke test
+        env:
+          MILL_BUN_USE_SYSTEM: 'false'
+        run: $MILL --no-server millbun.integration.testOnly mill.bun.BunManagedToolchainIntegrationTests
+
+  examples:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/mill-bun
+          key: mill-bun-${{ runner.os }}-${{ hashFiles('millbun/src/mill/bun/BunToolchainModule.scala') }}
+
+      # Publish at whatever version the examples pin, so a release-version sweep cannot
+      # silently desynchronize this leg.
+      - name: Publish the plugin locally
+        run: |
+          V=$(grep -o 'mill-bun_mill1:[0-9][-0-9A-Za-z.]*' example-typescript/build.mill | cut -d: -f2)
+          PUBLISH_VERSION=$V ./mill --no-server millbun.publishLocal
+
+      - name: example-typescript
+        run: cd example-typescript && ./mill --no-server app.run && ./mill --no-server app.test.testForked
+
+      - name: example-scalajs
+        run: cd example-scalajs && ./mill --no-server app.run && ./mill --no-server app.test.testForked
+
+      - name: examples project compiles
+        run: cd examples && ./mill --no-server __.compile

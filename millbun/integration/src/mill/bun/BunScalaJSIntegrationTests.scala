@@ -4,29 +4,7 @@ import mill.api.PathRef
 import mill.testkit.IntegrationTester
 import utest._
 
-object BunScalaJSIntegrationTests extends TestSuite {
-  val resourceDir: os.Path = os.Path(sys.env("MILL_WORKSPACE_ROOT")) / "millbun" / "integration" / "resources"
-  val millExe: os.Path = os.Path(sys.env("MILL_EXECUTABLE_PATH"))
-
-  private def tester(resource: String): IntegrationTester =
-    new IntegrationTester(
-      daemonMode = false,
-      workspaceSourcePath = resourceDir / resource,
-      millExecutable = millExe,
-      useInMemory = true
-    )
-
-  private def outputPath(tester: IntegrationTester, selector: String): os.Path =
-    tester.out(selector).value[PathRef].path
-
-  private def commandLogPath(tester: IntegrationTester, selector: String): os.Path = {
-    val segments = selector.split('.')
-    val rel =
-      if (segments.length <= 1) os.RelPath(".")
-      else os.RelPath(segments.dropRight(1).mkString("/"))
-    tester.workspacePath / "out" / rel / s"${segments.last}.log"
-  }
-
+object BunScalaJSIntegrationTests extends BunIntegrationSuite {
   private def bundledScript(dist: os.Path): os.Path =
     os.walk(dist)
       .find(path => os.isFile(path) && path.ext == "js")
@@ -61,39 +39,77 @@ object BunScalaJSIntegrationTests extends TestSuite {
       assert(res.isSuccess)
     }
 
-    test("bunBundle") {
+    test("bundle") {
       val tester = this.tester("scalajs-bundle")
-      val res = tester.eval("app.bunBundle")
+      val res = tester.eval("app.bundle")
       assert(res.isSuccess)
 
-      val dist = outputPath(tester, "app.bunBundle")
+      val dist = outputPath(tester, "app.bundle")
       val mainJs = bundledScript(dist)
       assert(runBundledScript(mainJs) == "Hello from scala.js with lodash on bun")
     }
 
-    test("bunCompileExecutable") {
-      val tester = this.tester("scalajs-bundle")
-      val res = tester.eval("app.bunCompileExecutable")
+    test("web bundle includes HTML CSS and JavaScript") {
+      val tester = this.tester("scalajs-web")
+      val res = tester.eval("app.bundle")
       assert(res.isSuccess)
 
-      val executable = outputPath(tester, "app.bunCompileExecutable")
+      val dist = outputPath(tester, "app.bundle")
+      val files = os.walk(dist).filter(os.isFile)
+      assert(files.exists(_.ext == "html"))
+      assert(files.exists(_.ext == "css"))
+      assert(files.exists(_.ext == "js"))
+    }
+
+    test("web stage resolves npm dependencies") {
+      // The fixture imports lodash via @JSImport, so the linked output carries a real npm
+      // import that `bun build` has to resolve out of the staged directory. Staging used to
+      // flatten the install's node_modules symlink into an empty directory, which made every
+      // npm import unresolvable.
+      val tester = this.tester("scalajs-web")
+      assert(tester.eval("app.bundle").isSuccess)
+
+      val stage = tester.workspacePath / "out" / "app" / "webProductionStage.dest"
+      assert(os.isLink(stage / "node_modules"))
+      assert(os.exists(stage / "node_modules" / "lodash" / "package.json"))
+
+      // lodash must be inlined into the bundle, not left as a bare import.
+      val bundled = os.walk(outputPath(tester, "app.bundle"))
+        .filter(p => os.isFile(p) && p.ext == "js")
+        .map(os.read)
+        .mkString
+      assert(!bundled.contains("""from"lodash""""))
+      assert(!bundled.contains("""from "lodash""""))
+    }
+
+    test("compileExecutable") {
+      val tester = this.tester("scalajs-bundle")
+      val res = tester.eval("app.compileExecutable")
+      assert(res.isSuccess)
+
+      val executable = outputPath(tester, "app.compileExecutable")
+      // The recorded PathRef must name the file bun actually wrote — on Windows bun appends
+      // .exe, and CreateProcess would happily run an extensionless path that does not exist.
+      assert(os.isFile(executable))
       assert(runExecutable(executable) == "Hello from scala.js with lodash on bun")
     }
 
     test("transitive npm deps") {
       val tester = this.tester("scalajs-transitive")
-      val res = tester.eval("app.bunBundle")
+      val res = tester.eval("app.bundle")
       assert(res.isSuccess)
 
-      val dist = outputPath(tester, "app.bunBundle")
+      val dist = outputPath(tester, "app.bundle")
       val mainJs = bundledScript(dist)
       assert(runBundledScript(mainJs) == "Hello from transitive scala.js bun")
     }
 
-    test("bunTest") {
+    test("testForked runs Scala.js tests on Bun") {
       val tester = this.tester("scalajs-test")
-      val res = tester.eval("app.test.bunTest")
+      val res = tester.eval("app.test.testForked")
       assert(res.isSuccess)
+      // The deprecated alias must keep resolving until removal.
+      assert(tester.eval("app.test.bunTest").isSuccess)
     }
 
     test("bunfig propagates to Scala.js workspaces without leaking .npmrc") {
@@ -111,13 +127,13 @@ object BunScalaJSIntegrationTests extends TestSuite {
       assert(os.exists(linkedDir / "bunfig.toml"))
       assert(!os.exists(linkedDir / ".npmrc"))
 
-      val compileRes = tester.eval("app.bunCompileExecutable")
+      val compileRes = tester.eval("app.compileExecutable")
       assert(compileRes.isSuccess)
-      val compileWorkspace = tester.workspacePath / "out" / "app" / "bunCompileExecutable.dest" / "workspace"
+      val compileWorkspace = tester.workspacePath / "out" / "app" / "compileExecutable.dest" / "workspace"
       assert(os.exists(compileWorkspace / "bunfig.toml"))
       assert(!os.exists(compileWorkspace / ".npmrc"))
 
-      val testRes = tester.eval("app.test.bunTest")
+      val testRes = tester.eval("app.test.testForked")
       assert(testRes.isSuccess)
       val testRoot = tester.workspacePath / "out" / "app" / "test"
       assert(os.exists(testRoot))

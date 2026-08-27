@@ -20,6 +20,11 @@ import mill.scalajslib.api.ModuleKind
   */
 trait BunPublishModule extends BunScalaJSModule {
 
+  // Declared as a source: a plain read of workspaceRoot/.npmrc trips Mill's filesystem checker
+  // the moment the file exists (exactly the private-registry case vendoring needs), and an
+  // undeclared read would never invalidate this task when the file changes.
+  private def publishNpmRc = Task.Source(BuildCtx.workspaceRoot / ".npmrc")
+
   /** Embed resolved `node_modules` into published artifacts.
     *
     * Disabled by default because published JARs are cross-platform, while
@@ -27,27 +32,16 @@ trait BunPublishModule extends BunScalaJSModule {
     */
   def bunPublishVendoredRuntime: T[Boolean] = Task { false }
 
-  private def manifestField(extras: ujson.Obj, key: String, fallback: => Map[String, String]): Map[String, String] =
-    extras.value.get(key) match
-      case Some(value) =>
-        try value.obj.map((name, version) => name -> version.str).toMap
-        catch
-          case e: Exception =>
-            throw new RuntimeException(
-              s"BunPublishModule bunPackageJsonExtras.$key must be an object of string versions.",
-              e
-            )
-      case None => fallback
-
   private def resolvedPublishedManifest: Task[BunManifest] = Task.Anon {
-    val extras = bunPackageJsonExtras()
     def typed(deps: Seq[String]): Map[String, String] =
-      deps.map(BunToolchainModule.splitDep).map((k, v) => k -> v.str).toMap
+      BunToolchainModule.dependencyPairs(deps, npmOverrides()).map((k, v) => k -> v.str).toMap
 
     BunManifest(
-      dependencies = manifestField(extras, "dependencies", typed(npmDeps() ++ bunDeps())),
-      devDependencies = manifestField(extras, "devDependencies", typed(npmDevDeps() ++ bunDevDeps())),
-      optionalDependencies = manifestField(extras, "optionalDependencies", typed(bunOptionalDeps()))
+      dependencies = typed(npmDeps() ++ bunDeps()),
+      devDependencies = Map.empty,
+      optionalDependencies = typed(npmOptionalDeps() ++ bunOptionalDeps()),
+      peerDependencies = typed(npmPeerDeps()),
+      schemaVersion = 2
     )
   }
 
@@ -67,14 +61,17 @@ trait BunPublishModule extends BunScalaJSModule {
     val dest = Task.dest
     os.makeDir.all(dest)
 
-    val npmRc = BuildCtx.workspaceRoot / ".npmrc"
+    val npmRc = publishNpmRc().path
     if (os.exists(npmRc)) os.copy.over(npmRc, dest / ".npmrc", createFolders = true)
     bunfigFiles().foreach { cfg =>
       os.copy.over(cfg.path, dest / cfg.path.last, createFolders = true)
     }
 
-    val deps = (npmDeps() ++ bunDeps()).map(BunToolchainModule.splitDep)
-    val optional = bunOptionalDeps().map(BunToolchainModule.splitDep)
+    val deps = BunToolchainModule.dependencyPairsWithUnmanaged(
+      BunToolchainModule.dependencyPairs(npmDeps() ++ bunDeps(), npmOverrides()),
+      unmanagedDeps()
+    )
+    val optional = BunToolchainModule.dependencyPairs(npmOptionalDeps() ++ bunOptionalDeps(), npmOverrides())
     val base = ujson.Obj(
       "name" -> defaultPackageName,
       "private" -> true,
@@ -88,17 +85,25 @@ trait BunPublishModule extends BunScalaJSModule {
       case ModuleKind.ESModule => base("type") = "module"
       case _                   => ()
 
-    val merged = ujson.Obj.from(base.value.toSeq ++ bunPackageJsonExtras().value.toSeq)
+    val merged = BunToolchainModule.mergePackageJson(base, bunPackageJsonExtras())
     os.write.over(dest / "package.json", merged.render(indent = 2), createFolders = true)
 
-    val hasRuntimeInputs = deps.nonEmpty || optional.nonEmpty || unmanagedDeps().nonEmpty ||
-      bunPackageJsonExtras().value.nonEmpty
+    val hasRuntimeInputs = deps.nonEmpty || optional.nonEmpty || unmanagedDeps().nonEmpty
+    val lockfile = bunLockfile()
+    requireBunLockfile(hasRuntimeInputs, lockfile, bunRequireLockfile(), bunVersion())
+    copyBunLockfile(lockfile, dest)
     if hasRuntimeInputs then
+      BunToolchainModule.stageUnmanagedDeps(unmanagedDeps(), dest)
       runBun(
         bunExecutable(),
-        Seq("install") ++ bunInstallArgs() ++ unmanagedDeps().map(_.path.toString),
+        Seq("install") ++ resolvedBunInstallArgs(
+          bunInstallArgs(),
+          bunInstallExtraArgs(),
+          lockfile.nonEmpty,
+          updateLockfile = false
+        ),
         cwd = dest,
-        env = bunEnv()
+        env = bunToolEnv()
       )
 
     PathRef(dest)
@@ -126,14 +131,13 @@ trait BunPublishModule extends BunScalaJSModule {
     val manifest = resolvedPublishedManifest()
     val hasManifest =
       manifest.dependencies.nonEmpty ||
-        manifest.devDependencies.nonEmpty ||
-        manifest.optionalDependencies.nonEmpty
+        manifest.optionalDependencies.nonEmpty ||
+        manifest.peerDependencies.nonEmpty
     val hasVendoredRuntime =
       bunPublishVendoredRuntime() && (
         manifest.dependencies.nonEmpty ||
           manifest.optionalDependencies.nonEmpty ||
-          unmanagedDeps().nonEmpty ||
-          bunPackageJsonExtras().value.nonEmpty
+          unmanagedDeps().nonEmpty
       )
 
     (if hasManifest then Seq(bunDependencyManifest()) else Seq.empty) ++

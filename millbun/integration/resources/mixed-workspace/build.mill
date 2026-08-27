@@ -1,0 +1,63 @@
+//| mill-version: 1.1.5
+//| mill-jvm-version: system
+//| mvnDeps:
+//| - com.tjclp::mill-bun_mill1:0.0.0-NIGHTLY
+
+package build
+
+import mill.*
+import mill.bun.*
+import mill.javascriptlib.bun.*
+import mill.scalajslib.api.*
+import mill.scalajslib.bun.*
+
+object scalaApp extends BunScalaJSModule {
+  // Renamed deliberately: the layout's directory naming, duplicate guard, AND the generated
+  // member manifest must all follow this name, or bun sees a different identity than Mill.
+  override def bunWorkspacePackageName = Task { "scala-app-renamed" }
+  def scalaVersion = "3.8.2"
+  def scalaJSVersion = "1.22.0"
+  override def moduleKind = Task { ModuleKind.ESModule }
+  override def npmDeps = Task { Seq("is-even@1.0.0") }
+  override def unmanagedDeps = Task.Sources(moduleDir / "shared-local")
+  override def classpathBunDeps = Task { Seq.empty }
+  override def classpathBunOptionalDeps = Task { Seq.empty }
+  override def classpathBunPeerDeps = Task { Seq.empty }
+  override def bunWorkspaceInstall = Task { Some(workspace.bunInstall()) }
+}
+
+object typescriptApp extends BunTypeScriptModule {
+  override def npmDeps = Task { Seq("is-odd@3.0.1") }
+  override def bunWorkspaceInstall = Task { Some(workspace.bunInstall()) }
+}
+
+object workspace extends BunWorkspaceModule {
+  override def moduleDir = build.moduleDir
+  def bunWorkspacePackages = Seq(scalaApp, typescriptApp)
+  override def bunExecutable = Task { "stub-bun" }
+
+  override protected def runBun(
+      bunExe: String,
+      args: Seq[String],
+      cwd: os.Path,
+      env: Map[String, String]
+  ): os.CommandResult = {
+    os.walk(cwd / "packages")
+      .filter(_.last == "package.json")
+      .foreach { packageJson =>
+        val json = ujson.read(os.read(packageJson))
+        Seq("dependencies", "devDependencies", "optionalDependencies").foreach { field =>
+          json.obj.get(field).foreach(_.obj.foreach { case (name, version) =>
+            os.write.over(
+              cwd / "node_modules" / os.RelPath(name) / "package.json",
+              ujson.Obj("name" -> name, "version" -> version.str).render(),
+              createFolders = true
+            )
+          })
+        }
+      }
+    os.write.over(cwd / "bun.lock", "stub lock")
+    os.write.over(cwd / ".workspace-installed", args.mkString(" "))
+    os.call(Seq("true"), cwd = cwd, env = env)
+  }
+}

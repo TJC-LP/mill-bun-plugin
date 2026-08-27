@@ -1,0 +1,11 @@
+{
+  "lockfileVersion": 2,
+  "workspaces": {
+    "": {
+      "name": "app",
+      "dependencies": {
+        "is-even": "1.0.0",
+      },
+    },
+  },
+}

@@ -44,9 +44,19 @@ object BunVendoredNodeModules:
           FileVisitResult.CONTINUE
     )
 
-  /** Merge vendored node_modules from a classpath entry into a destination. */
+  /** Merge vendored node_modules from a classpath entry into a destination.
+    *
+    * Refuses a symlinked destination: in workspace mode `node_modules` is a link into the shared
+    * workspace install's `Task.dest`, and merging through it would silently mutate another task's
+    * output — shared by every other member of the workspace.
+    */
   def mergeFromClasspathEntry(entry: os.Path, destNodeModules: os.Path): Boolean =
-    if os.isDir(entry) then mergeFromDir(entry, destNodeModules, entry.toString)
+    if os.isLink(destNodeModules) then
+      throw new RuntimeException(
+        s"Refusing to merge vendored Bun runtime into $destNodeModules: it is a symlink to " +
+          s"${os.readLink.absolute(destNodeModules)}, which belongs to another task."
+      )
+    else if os.isDir(entry) then mergeFromDir(entry, destNodeModules, entry.toString)
     else if os.exists(entry) && entry.ext == "jar" then mergeFromJar(entry, destNodeModules)
     else false
 
@@ -74,9 +84,16 @@ object BunVendoredNodeModules:
       if entries.isEmpty then return false
 
       entries.sortBy(_.getName).foreach { entry =>
-        val relString = entry.getName.stripPrefix(prefix)
+        // Normalize the separators some zip writers use, then refuse entries that climb out of
+        // the bundle root: a hostile jar with `META-INF/bun/node_modules/../../x` must never
+        // become a write outside the destination (zip-slip).
+        val relString = entry.getName.replace('\\', '/').stripPrefix(prefix)
         if relString.nonEmpty then
           val rel = os.RelPath(relString)
+          if rel.ups != 0 then
+            throw new RuntimeException(
+              s"Vendored Bun bundle entry escapes its root in $jarPath: ${entry.getName}"
+            )
           if !shouldSkip(rel.toNIO) then
             val dest = destNodeModules / rel
             val sourceLabel = s"$jarPath!/${entry.getName}"

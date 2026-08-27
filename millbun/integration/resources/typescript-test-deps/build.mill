@@ -11,11 +11,16 @@ import mill.javascriptlib.bun.*
 object app extends BunTypeScriptModule {
   override def moduleDir = build.moduleDir
 
+  // Pinned in the fixture rather than relying on the suite's env default, so the strict
+  // lockfile path is exercised regardless of how the suite is invoked.
+  override def bunRequireLockfile = Task { true }
+
   // Production dependency
   override def npmDeps = Task { Seq("is-even@1.0.0") }
 
   object test extends BunTypeScriptTests {
-    // Test-only dependency — should land in devDependencies, not dependencies
+    // Test-only dependency — should land in devDependencies, not dependencies. Because it is a
+    // dependency the outer module does not have, this test module needs its own bun.lock.
     override def npmDeps = Task { Seq("is-odd@3.0.1") }
   }
 }

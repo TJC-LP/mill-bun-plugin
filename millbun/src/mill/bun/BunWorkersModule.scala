@@ -15,9 +15,7 @@ import mill.javascriptlib.bun.BunTypeScriptModule
  * Usage:
  * {{{
  * object app extends BunTypeScriptModule with BunWorkersModule {
- *   override def workerEntryPoints = Task {
- *     Seq(PathRef(millSourcePath / "src" / "worker.ts"))
- *   }
+ *   override def workerEntryPoints = Task.Sources(moduleDir / "src" / "worker.ts")
  * }
  * }}}
  */
@@ -33,7 +31,7 @@ trait BunWorkersModule extends BunToolchainModule { this: BunTypeScriptModule =>
   def workerBundleTarget: T[String] = Task { bunBundleTarget() }
 
   /** Output format for worker bundles. Defaults to the module format. */
-  def workerBundleFormat: T[Option[String]] = Task { Some(bunBundleFormat()) }
+  def workerBundleFormat: T[Option[String]] = Task { bunBundleFormat() }
 
   /** Extra raw flags for worker bundling. */
   def workerBundleArgs: T[Seq[String]] = Task { Seq.empty }
@@ -59,6 +57,9 @@ trait BunWorkersModule extends BunToolchainModule { this: BunTypeScriptModule =>
   def bundleWorkers: T[PathRef] = Task {
     val workspace = Task.dest / "workspace"
     val outDir = Task.dest / "workers"
+    // Declared explicitly: the staged tree carries a node_modules symlink into this install,
+    // and Mill's filesystem checker only permits reading a dest we depend on.
+    bunInstall()
     BunToolchainModule.copyWorkspace(compile().path, workspace)
     os.makeDir.all(outDir)
 
@@ -91,7 +92,7 @@ trait BunWorkersModule extends BunToolchainModule { this: BunTypeScriptModule =>
           target
         ) ++ formatArgs ++ extraArgs,
         cwd = workspace,
-        env = bunEnv()
+        env = bunToolEnv()
       )
     }
 

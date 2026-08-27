@@ -20,6 +20,18 @@ extension (sc: StringContext)
   inline def bun(inline args: Any*): String =
     ${ BunDepMacro.validateImpl('sc, 'args) }
 
+object BunDep:
+  /**
+   * Validate a dependency the macro could not check at compile time, returning it unchanged.
+   *
+   * Used for interpolated forms like `bun"react@$version"`, where the value only exists once the
+   * build evaluates. Failing here still beats failing inside `bun install`.
+   */
+  def validate(dep: String): String =
+    BunToolchainModule.parseDependency(dep) match
+      case Right(_)     => dep
+      case Left(message) => throw new IllegalArgumentException(s"Invalid bun dependency: $message")
+
 private object BunDepMacro:
   import scala.quoted.*
 
@@ -30,8 +42,9 @@ private object BunDepMacro:
         Expr(literal)
       case _ =>
         // Has interpolated parts, a non-literal StringContext, or runs inside another
-        // macro-generated context — build at runtime and skip compile-time validation.
-        '{ $sc.s($args*) }
+        // macro-generated context, so the value is not known at compile time. Validate when
+        // the build evaluates it instead, which still fails before any install runs.
+        '{ BunDep.validate($sc.s($args*)) }
 
   private def literalParts(sc: Expr[StringContext])(using Quotes): Option[Seq[String]] =
     import quotes.reflect.*
@@ -74,30 +87,15 @@ private object BunDepMacro:
 
     extractRepeatedArgs(args.asTerm.underlyingArgument).contains(Nil)
 
+  /**
+   * Validate against the same parser the build uses at task time.
+   *
+   * This deliberately delegates rather than re-deriving the rules: a second, weaker parser here
+   * meant `bun"react@"` compiled cleanly and then threw from `parseDependency` during the install,
+   * which is exactly what the interpolator exists to prevent.
+   */
   private def validateLiteral(dep: String)(using Quotes): Unit =
     import quotes.reflect.*
-    if dep.isEmpty then
-      report.errorAndAbort("bun dependency cannot be empty. Use bun\"package@version\" format.")
-    // Validate package name format
-    val name = if dep.startsWith("@") then
-      // Scoped: @scope/name or @scope/name@version
-      val afterScope = dep.drop(1)
-      if !afterScope.contains('/') then
-        report.errorAndAbort(
-          s"Invalid scoped package: '$dep'. Expected @scope/name or @scope/name@version"
-        )
-      val slashIdx = afterScope.indexOf('/')
-      val scopeName = afterScope.take(slashIdx)
-      if scopeName.isEmpty then
-        report.errorAndAbort(s"Invalid scoped package: '$dep'. Scope name is empty.")
-      val afterSlash = afterScope.drop(slashIdx + 1)
-      val nameOnly = if afterSlash.contains('@') then afterSlash.take(afterSlash.indexOf('@')) else afterSlash
-      if nameOnly.isEmpty then
-        report.errorAndAbort(s"Invalid scoped package: '$dep'. Package name is empty after scope.")
-      dep
-    else
-      // Unscoped: name or name@version
-      val nameOnly = if dep.contains('@') then dep.take(dep.indexOf('@')) else dep
-      if nameOnly.isEmpty then
-        report.errorAndAbort(s"Invalid package: '$dep'. Package name cannot be empty.")
-      dep
+    BunToolchainModule.parseDependency(dep).left.foreach { message =>
+      report.errorAndAbort(s"Invalid bun dependency: $message")
+    }

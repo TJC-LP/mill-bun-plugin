@@ -14,6 +14,7 @@ import mill.scalajslib.bun.*
 object app extends BunScalaJSModule {
   override def moduleDir = build.moduleDir
   def scalaVersion = "3.8.2"
+  def scalaJSVersion = "1.22.0"
 
   override def moduleKind = Task { ModuleKind.ESModule }
 

@@ -1,39 +1,16 @@
 //| mill-version: 1.1.5
+//| mill-jvm-version: system
 //| mvnDeps:
-//| - com.tjclp::mill-bun_mill1:0.2.1
+//| - com.tjclp::mill-bun_mill1:0.3.0
 
 package build
 
 import mill.*
 import mill.javascriptlib.bun.*
 
-object shared extends BunTypeScriptModule {
-  override def npmDevDeps = Task {
-    Seq("typescript@5.7.3")
-  }
-}
-
-object frontend extends BunTypeScriptModule {
-  override def moduleDeps = Seq(shared)
-
-  override def npmDeps = Task {
-    Seq(
-      "react@19.1.1",
-      "react-dom@19.1.1"
-    )
-  }
-
-  override def npmDevDeps = Task {
-    Seq(
-      "typescript@5.7.3",
-      "@types/react@19.1.2",
-      "@types/react-dom@19.1.2"
-    )
-  }
-
-  override def enableEsm = Task { true }
-  override def bunBundleTarget = Task { "browser" }
-  override def bunBundleFormat = Task { "esm" }
+object app extends BunTypeScriptModule {
+  override def moduleDir = build.moduleDir
+  override def npmDeps = Task { Seq("hono@^4.9.0") }
 
   object test extends BunTypeScriptTests
 }

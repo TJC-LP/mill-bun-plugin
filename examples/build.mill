@@ -1,7 +1,7 @@
 //| mill-version: 1.1.5
 //| mill-jvm-version: system
 //| mvnDeps:
-//| - com.tjclp::mill-bun_mill1:0.2.1
+//| - com.tjclp::mill-bun_mill1:0.3.0
 
 package build
 
@@ -18,20 +18,22 @@ import mill.javascriptlib.bun.*
 
 // --- Web Server (Bun.serve HTTP server) ---
 // ./mill webServer.run
-// ./mill webServer.bunBundle
-// ./mill webServer.bunCompileExecutable
+// ./mill webServer.bundle
+// ./mill webServer.compileExecutable
 object webServer extends BunScalaJSModule {
   override def sources = Task.Sources(build.moduleDir / "web-server" / "src")
   def scalaVersion = "3.8.2"
+  def scalaJSVersion = "1.22.0"
   override def moduleKind = Task { ModuleKind.ESModule }
   override def bunBundleTarget = Task { "bun" }
 }
 
 // --- Frontend Todo App (browser bundle) ---
-// ./mill todoApp.bunBundle
+// ./mill todoApp.bundle
 object todoApp extends BunScalaJSModule {
   override def sources = Task.Sources(build.moduleDir / "frontend" / "src")
   def scalaVersion = "3.8.2"
+  def scalaJSVersion = "1.22.0"
   def mvnDeps = Seq(mvn"org.scala-js::scalajs-dom::2.8.1")
   override def moduleKind = Task { ModuleKind.ESModule }
   override def bunBundleTarget = Task { "browser" }
@@ -39,18 +41,20 @@ object todoApp extends BunScalaJSModule {
 
 // --- Fullstack (shared types + Bun server + browser frontend) ---
 // ./mill fullstack.server.run
-// ./mill fullstack.frontend.bunBundle
+// ./mill fullstack.frontend.bundle
 // ./mill fullstack.__.compile
 object fullstack extends Module {
   object shared extends BunScalaJSModule {
     override def sources = Task.Sources(build.moduleDir / "fullstack" / "shared")
     def scalaVersion = "3.8.2"
+    def scalaJSVersion = "1.22.0"
     override def moduleKind = Task { ModuleKind.ESModule }
   }
 
   object server extends BunScalaJSModule {
     override def sources = Task.Sources(build.moduleDir / "fullstack" / "server")
     def scalaVersion = shared.scalaVersion
+    def scalaJSVersion = shared.scalaJSVersion
     override def moduleKind = Task { ModuleKind.ESModule }
     override def moduleDeps = Seq(shared)
     override def bunBundleTarget = Task { "bun" }
@@ -59,6 +63,7 @@ object fullstack extends Module {
   object frontend extends BunScalaJSModule {
     override def sources = Task.Sources(build.moduleDir / "fullstack" / "frontend")
     def scalaVersion = shared.scalaVersion
+    def scalaJSVersion = shared.scalaJSVersion
     override def moduleKind = Task { ModuleKind.ESModule }
     override def moduleDeps = Seq(shared)
     def mvnDeps = Seq(mvn"org.scala-js::scalajs-dom::2.8.1")
@@ -74,9 +79,9 @@ object fullstack extends Module {
 // No moduleDir or sources overrides needed.
 //
 //   ./mill tsLib.compile                  # TypeScript type-check
-//   ./mill tsLib.test.test                # Bun-native tests
+//   ./mill tsLib.test.testForked              # Bun-native tests
 //   ./mill client.bundle                  # TS browser bundle (imports tsLib)
-//   ./mill scalaClient.bunBundle          # Scala.js browser bundle
+//   ./mill scalaClient.bundle             # Scala.js browser bundle
 //   ./mill backend.run                    # JVM Cask server on :8080
 //   ./mill __.compile                     # compile EVERYTHING
 
@@ -103,6 +108,7 @@ object client extends BunTypeScriptModule {
 // --- Scala.js browser frontend (alternative client) ---
 object scalaClient extends BunScalaJSModule {
   def scalaVersion = "3.8.2"
+  def scalaJSVersion = "1.22.0"
   def mvnDeps = Seq(mvn"org.scala-js::scalajs-dom::2.8.1")
   override def moduleKind = Task { ModuleKind.ESModule }
   override def bunBundleTarget = Task { "browser" }

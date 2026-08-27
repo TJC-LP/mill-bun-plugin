@@ -16,7 +16,9 @@ import java.util.jar.JarFile
 final case class BunManifest(
     dependencies: Map[String, String],
     devDependencies: Map[String, String],
-    optionalDependencies: Map[String, String]
+    optionalDependencies: Map[String, String],
+    peerDependencies: Map[String, String] = Map.empty,
+    schemaVersion: Int = 2
 )
 
 object BunManifest:
@@ -26,25 +28,46 @@ object BunManifest:
 
   /** Serialize manifest to JSON. */
   def toJson(manifest: BunManifest): ujson.Obj =
+    if manifest.schemaVersion != 1 && manifest.schemaVersion != 2 then
+      throw new IllegalArgumentException(s"Unsupported Bun manifest schemaVersion ${manifest.schemaVersion}")
+    if manifest.schemaVersion == 2 && manifest.devDependencies.nonEmpty then
+      throw new IllegalArgumentException("Bun manifest schema v2 does not allow devDependencies")
     val obj = ujson.Obj(
-      "dependencies" -> ujson.Obj.from(manifest.dependencies.map((k, v) => k -> ujson.Str(v))),
-      "devDependencies" -> ujson.Obj.from(manifest.devDependencies.map((k, v) => k -> ujson.Str(v)))
+      "schemaVersion" -> manifest.schemaVersion,
+      "dependencies" -> dependencyJson(manifest.dependencies)
     )
+    if manifest.schemaVersion == 1 && manifest.devDependencies.nonEmpty then
+      obj("devDependencies") = dependencyJson(manifest.devDependencies)
     if manifest.optionalDependencies.nonEmpty then
-      obj("optionalDependencies") = ujson.Obj.from(
-        manifest.optionalDependencies.map((k, v) => k -> ujson.Str(v))
-      )
+      obj("optionalDependencies") = dependencyJson(manifest.optionalDependencies)
+    if manifest.peerDependencies.nonEmpty then
+      obj("peerDependencies") = dependencyJson(manifest.peerDependencies)
     obj
+
+  private def dependencyJson(dependencies: Map[String, String]): ujson.Obj =
+    ujson.Obj.from(dependencies.toSeq.sortBy(_._1).map((name, version) => name -> ujson.Str(version)))
 
   /** Deserialize manifest from JSON. */
   def fromJson(json: ujson.Value): BunManifest =
     val obj = json.obj
+    val schemaVersion = obj.get("schemaVersion").map(_.num.toInt).getOrElse(1)
+    if schemaVersion != 1 && schemaVersion != 2 then
+      throw new IllegalArgumentException(s"Unsupported Bun manifest schemaVersion $schemaVersion")
+    if schemaVersion == 2 && obj.contains("devDependencies") then
+      throw new IllegalArgumentException("Bun manifest schema v2 does not allow devDependencies")
+
     def readDeps(key: String): Map[String, String] =
-      obj.get(key).map(_.obj.map((k, v) => k -> v.str).toMap).getOrElse(Map.empty)
+      obj.get(key).map { value =>
+        value.obj.map { case (name, specifier) =>
+          name -> specifier.str
+        }.toMap
+      }.getOrElse(Map.empty)
     BunManifest(
       dependencies = readDeps("dependencies"),
       devDependencies = readDeps("devDependencies"),
-      optionalDependencies = readDeps("optionalDependencies")
+      optionalDependencies = readDeps("optionalDependencies"),
+      peerDependencies = readDeps("peerDependencies"),
+      schemaVersion = schemaVersion
     )
 
   /** Read a manifest from inside a JAR file. Returns None if no manifest is present. */
@@ -58,23 +81,31 @@ object BunManifest:
         val is = jar.getInputStream(entry)
         try Some(fromJson(ujson.read(is)))
         finally is.close()
-    catch case _: Exception => None
     finally jar.close()
 
   /** Read a manifest from an unpacked directory (e.g., classes output). */
   def readFromDir(dirPath: os.Path): Option[BunManifest] =
     val manifestFile = dirPath / os.RelPath(ManifestPath)
     if os.exists(manifestFile) then
-      try Some(fromJson(ujson.read(os.read(manifestFile))))
-      catch case _: Exception => None
+      Some(fromJson(ujson.read(os.read(manifestFile))))
     else None
 
-  /** Merge multiple manifests into one. Later entries override earlier ones for the same package. */
+  /** Merge publishable fields, rejecting contradictions and discarding legacy v1 development metadata. */
   def merge(manifests: Seq[BunManifest]): BunManifest =
-    manifests.foldLeft(empty) { (acc, m) =>
-      BunManifest(
-        dependencies = acc.dependencies ++ m.dependencies,
-        devDependencies = acc.devDependencies ++ m.devDependencies,
-        optionalDependencies = acc.optionalDependencies ++ m.optionalDependencies
-      )
-    }
+    def mergeField(field: String, values: Seq[Map[String, String]]): Map[String, String] =
+      values.flatMap(_.toSeq).groupBy(_._1).map { case (name, entries) =>
+        val specifiers = entries.map(_._2).distinct
+        if specifiers.size > 1 then
+          throw new IllegalArgumentException(
+            s"Conflicting $field dependency '$name': ${specifiers.sorted.mkString(", ")}"
+          )
+        name -> specifiers.head
+      }
+
+    BunManifest(
+      dependencies = mergeField("runtime", manifests.map(_.dependencies)),
+      devDependencies = Map.empty,
+      optionalDependencies = mergeField("optional", manifests.map(_.optionalDependencies)),
+      peerDependencies = mergeField("peer", manifests.map(_.peerDependencies)),
+      schemaVersion = 2
+    )

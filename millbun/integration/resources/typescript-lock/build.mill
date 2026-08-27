@@ -1,0 +1,32 @@
+//| mill-version: 1.1.5
+//| mill-jvm-version: system
+//| mvnDeps:
+//| - com.tjclp::mill-bun_mill1:0.0.0-NIGHTLY
+
+package build
+
+import mill.*
+import mill.javascriptlib.bun.*
+
+object app extends BunTypeScriptModule {
+  override def moduleDir = build.moduleDir
+  override def npmDeps = Task { Seq("is-even@1.0.0") }
+  override def bunRequireLockfile = Task { true }
+  override def bunExecutable = Task { "stub-bun" }
+
+  override protected def runBun(
+      bunExe: String,
+      args: Seq[String],
+      cwd: os.Path,
+      env: Map[String, String]
+  ): os.CommandResult = {
+    os.write.over(cwd / ".bun-args", args.mkString(" "))
+    os.write.over(cwd / "bun.lock", "stub lock")
+    os.write.over(
+      cwd / "node_modules" / "is-even" / "package.json",
+      ujson.Obj("name" -> "is-even", "version" -> "1.0.0").render(),
+      createFolders = true
+    )
+    os.call(Seq("true"), cwd = cwd, env = env)
+  }
+}

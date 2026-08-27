@@ -4,21 +4,7 @@ import mill.api.PathRef
 import mill.testkit.IntegrationTester
 import utest.*
 
-object BunDependencyManifestIntegrationTests extends TestSuite {
-  val resourceDir: os.Path = os.Path(sys.env("MILL_WORKSPACE_ROOT")) / "millbun" / "integration" / "resources"
-  val millExe: os.Path = os.Path(sys.env("MILL_EXECUTABLE_PATH"))
-
-  private def tester(resource: String): IntegrationTester =
-    new IntegrationTester(
-      daemonMode = false,
-      workspaceSourcePath = resourceDir / resource,
-      millExecutable = millExe,
-      useInMemory = true
-    )
-
-  private def outputPath(tester: IntegrationTester, selector: String): os.Path =
-    tester.out(selector).value[PathRef].path
-
+object BunDependencyManifestIntegrationTests extends BunIntegrationSuite {
   def tests: Tests = Tests {
 
     test("invalid bun literal fails in build definitions") {
@@ -27,20 +13,25 @@ object BunDependencyManifestIntegrationTests extends TestSuite {
       assert(!res.isSuccess)
     }
 
-    test("published dev-only manifests are still emitted") {
+    test("invalid bun specifier fails in build definitions") {
+      // The macro only checked the package-name half, so bun"react@" compiled cleanly and then
+      // threw from parseDependency during the install — defeating the interpolator's purpose.
+      val tester = this.tester("invalid-bun-specifier")
+      val res = tester.eval("app.bunDeps")
+      assert(!res.isSuccess)
+    }
+
+    test("published dev-only modules do not emit runtime manifests") {
       val tester = this.tester("scalajs-dependency-manifests")
       val res = tester.eval("publishedDevOnlyLib.jar")
       assert(res.isSuccess)
 
       val jar = outputPath(tester, "publishedDevOnlyLib.jar")
       val manifest = BunManifest.readFromJar(jar)
-      assert(manifest.isDefined)
-      assert(manifest.get.dependencies.isEmpty)
-      assert(manifest.get.devDependencies == Map("dev-only" -> "^2.0.0"))
-      assert(manifest.get.optionalDependencies.isEmpty)
+      assert(manifest.isEmpty)
     }
 
-    test("published manifests include dev-only modules") {
+    test("published manifests exclude local development dependencies") {
       val tester = this.tester("scalajs-dependency-manifests")
       val res = tester.eval("publishedLib.jar")
       assert(res.isSuccess)
@@ -48,9 +39,11 @@ object BunDependencyManifestIntegrationTests extends TestSuite {
       val jar = outputPath(tester, "publishedLib.jar")
       val manifest = BunManifest.readFromJar(jar)
       assert(manifest.isDefined)
+      assert(manifest.get.schemaVersion == 2)
       assert(manifest.get.dependencies.isEmpty)
-      assert(manifest.get.devDependencies == Map("dev-only" -> "^2.0.0"))
+      assert(manifest.get.devDependencies.isEmpty)
       assert(manifest.get.optionalDependencies == Map("optional-published" -> "^3.0.0"))
+      assert(manifest.get.peerDependencies == Map("peer-published" -> "^4.0.0"))
     }
 
     test("published jars stay manifest-only by default") {
@@ -71,17 +64,18 @@ object BunDependencyManifestIntegrationTests extends TestSuite {
       assert(packageJson("optionalDependencies").obj("optional-local").str == "^1.0.0")
     }
 
-    test("classpath manifests flow dev and optional deps into generated package.json") {
+    test("classpath manifests flow publishable deps into generated package.json") {
       val tester = this.tester("scalajs-dependency-manifests")
       val res = tester.eval("appPublished.bunInstall")
       assert(res.isSuccess)
 
       val packageJson = ujson.read(os.read(tester.workspacePath / "out" / "appPublished" / "bunInstall.dest" / "package.json"))
-      assert(packageJson("devDependencies").obj("dev-only").str == "^2.0.0")
+      assert(!packageJson("devDependencies").obj.contains("dev-only"))
       assert(packageJson("optionalDependencies").obj("optional-published").str == "^3.0.0")
+      assert(packageJson("peerDependencies").obj("peer-published").str == "^4.0.0")
     }
 
-    test("bunInstall runs when bunPackageJsonExtras adds dependencies") {
+    test("bunInstall runs for typed npm dependencies") {
       val tester = this.tester("scalajs-dependency-manifests")
       val res = tester.eval("appExtrasOnly.bunInstall")
       assert(res.isSuccess)
@@ -91,7 +85,7 @@ object BunDependencyManifestIntegrationTests extends TestSuite {
       assert(os.exists(installDir / "node_modules" / "extras-only" / "package.json"))
     }
 
-    test("bunPublishedRuntimeInstall runs for vendored extras-only published deps") {
+    test("bunPublishedRuntimeInstall runs for vendored typed published deps") {
       val tester = this.tester("scalajs-dependency-manifests")
       val res = tester.eval("publishedVendoredExtraLib.bunPublishedRuntimeInstall")
       assert(res.isSuccess)

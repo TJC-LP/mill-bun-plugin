@@ -6,9 +6,10 @@
 package build
 
 import mill.*
+import mill.bun.*
 import mill.javascriptlib.bun.*
 
-object app extends BunTypeScriptModule {
+object app extends BunTypeScriptModule with BunSQLiteModule {
   override def moduleDir = build.moduleDir
   override def npmDevDeps = Task { Seq("typescript@5.7.3") }
   override def compilerOptions = Task {
@@ -17,7 +18,10 @@ object app extends BunTypeScriptModule {
       "moduleResolution" -> ujson.Str("bundler")
     )
   }
-  override def bunCompileExecutable = Task { true }
   override def bunBundleTarget = Task { "bun" }
-  override def bunCompileResources = Task.Sources("embedded")
+  // Chained through super so BunSQLiteModule's discovered databases stay in the set — an
+  // unqualified override here would silently drop the mixin's contribution.
+  def embeddedResources = Task.Sources("embedded")
+  override def bunCompileResources = Task { super.bunCompileResources() ++ embeddedResources() }
+  override def sqliteDatabaseDir = Task.Input { Some(PathRef(moduleDir / "data")) }
 }
