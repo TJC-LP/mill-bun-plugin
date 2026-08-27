@@ -99,6 +99,18 @@ object BunTypeScriptIntegrationTests extends TestSuite {
       assert(args.contains("--frozen-lockfile"))
     }
 
+    test("a lockfile from a newer Bun fails with regeneration guidance") {
+      // bun.lock is forward- but not backward-compatible; bun's own failure is a raw
+      // UnknownLockfileVersion that never mentions bunLock. The fixture's stub proves the
+      // guard fires before any bun subprocess is reached.
+      val tester = this.tester("typescript-stale-lock")
+      val res = tester.eval("app.bunInstall")
+      assert(!res.isSuccess)
+      // The message text is asserted at unit level (lockfileSkewError); in-memory evals expose
+      // no readable error stream, so here the contract is: fail, and never reach bun.
+      assert(!os.exists(tester.workspacePath / "out" / "app" / "bunInstall.dest" / ".stub-bun-ran"))
+    }
+
     test("bun target ambient types are pinned") {
       val tester = this.tester("typescript-simple")
       val res = tester.eval("app.bunInstall")

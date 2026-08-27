@@ -1,0 +1,30 @@
+//| mill-version: 1.1.5
+//| mill-jvm-version: system
+//| mvnDeps:
+//| - com.tjclp::mill-bun_mill1:0.0.0-NIGHTLY
+
+package build
+
+import mill.*
+import mill.javascriptlib.bun.*
+
+// Pins a Bun that cannot read the committed lockfileVersion (1.3.14 reads only v1; the lock
+// says v2). The install must fail with regeneration guidance before bun ever runs — the stub
+// proves no subprocess is reached.
+object app extends BunTypeScriptModule {
+  override def moduleDir = build.moduleDir
+  override def bunVersion = Task { "1.3.14" }
+  override def bunVerifyVersion = Task { false }
+  override def bunExecutable = Task { "stub-bun" }
+  override def npmDeps = Task { Seq("is-even@1.0.0") }
+
+  override protected def runBun(
+      bunExe: String,
+      args: Seq[String],
+      cwd: os.Path,
+      env: Map[String, String]
+  ): os.CommandResult = {
+    os.write.over(cwd / ".stub-bun-ran", args.mkString(" "))
+    os.call(Seq("true"), cwd = cwd, env = env)
+  }
+}

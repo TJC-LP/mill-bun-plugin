@@ -85,7 +85,7 @@ trait BunPublishModule extends BunScalaJSModule {
 
     val hasRuntimeInputs = deps.nonEmpty || optional.nonEmpty || unmanagedDeps().nonEmpty
     val lockfile = bunLockfile()
-    requireBunLockfile(hasRuntimeInputs, lockfile, bunRequireLockfile())
+    requireBunLockfile(hasRuntimeInputs, lockfile, bunRequireLockfile(), bunVersion())
     copyBunLockfile(lockfile, dest)
     if hasRuntimeInputs then
       BunToolchainModule.stageUnmanagedDeps(unmanagedDeps(), dest)

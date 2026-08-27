@@ -115,7 +115,7 @@ trait BunWorkspaceModule extends BunToolchainModule:
     copyConfigs(Task.dest, npmRc().path, bunfigFiles())
 
     val lockfile = bunLockfile()
-    requireBunLockfile(hasDependencyInputs(packages), lockfile, bunRequireLockfile())
+    requireBunLockfile(hasDependencyInputs(packages), lockfile, bunRequireLockfile(), bunVersion())
     copyBunLockfile(lockfile, Task.dest)
 
     runBun(

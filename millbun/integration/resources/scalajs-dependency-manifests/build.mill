@@ -17,6 +17,8 @@ trait StubBunModule extends BunScalaJSModule {
   def scalaJSVersion = "1.22.0"
   override def moduleKind = Task { ModuleKind.CommonJSModule }
   override def bunExecutable = Task { "stub-bun" }
+  // The stub never produces a real lockfile; the strict path is covered by real-bun fixtures.
+  override def bunRequireLockfile = Task { false }
 
   override protected def runBun(
       bunExe: String,

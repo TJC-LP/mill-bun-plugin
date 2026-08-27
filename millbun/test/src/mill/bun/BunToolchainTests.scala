@@ -151,6 +151,29 @@ object BunToolchainTests extends TestSuite:
       assert(os.read(cached) == "bun-binary")
       assert(os.list(cached / os.up) == Seq(cached))
 
+    test("lockfile version is extracted lexically from JSONC"):
+      // bun.lock has trailing commas, so a JSON parser cannot be the extraction mechanism.
+      assert(BunToolchainModule.lockfileVersion("{\n  \"lockfileVersion\": 2,\n}") == Some(2))
+      assert(BunToolchainModule.lockfileVersion("not a lockfile") == None)
+
+    test("a newer lock against an older Bun explains how to recover"):
+      val lock = "{\n  \"lockfileVersion\": 2,\n}"
+      val error = BunToolchainModule.lockfileSkewError(lock, os.root / "bun.lock", "1.3.14")
+      assert(error.exists(_.contains("Regenerate the lockfile")))
+      assert(error.exists(_.contains("lockfileVersion 2")))
+      // Readable combinations stay silent: same version, older lock, or an unbundled Bun.
+      assert(BunToolchainModule.lockfileSkewError(lock, os.root / "bun.lock", "1.4.0").isEmpty)
+      val v1 = "{\n  \"lockfileVersion\": 1,\n}"
+      assert(BunToolchainModule.lockfileSkewError(v1, os.root / "bun.lock", "1.3.14").isEmpty)
+      assert(BunToolchainModule.lockfileSkewError(lock, os.root / "bun.lock", "9.9.9").isEmpty)
+
+    test("every bundled Bun declares its supported lockfile version"):
+      // Committed fixture locks make the pin load-bearing: a version added to the checksum
+      // table without a lockfile-version entry silently disables the skew guard for it.
+      BunToolchainModule.bundledVersions.foreach { version =>
+        assert(BunToolchainModule.supportedLockfileVersion(version).nonEmpty)
+      }
+
     test("unmanaged deps become file: specifiers under vendor"):
       val dep = os.temp.dir() / "local-lib"
       os.write(dep / "package.json", """{"name":"local-lib","version":"1.0.0"}""", createFolders = true)
