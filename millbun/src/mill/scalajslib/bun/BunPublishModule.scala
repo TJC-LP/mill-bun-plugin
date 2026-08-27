@@ -62,7 +62,10 @@ trait BunPublishModule extends BunScalaJSModule {
       os.copy.over(cfg.path, dest / cfg.path.last, createFolders = true)
     }
 
-    val deps = BunToolchainModule.dependencyPairs(npmDeps() ++ bunDeps(), npmOverrides())
+    val deps = BunToolchainModule.dependencyPairsWithUnmanaged(
+      BunToolchainModule.dependencyPairs(npmDeps() ++ bunDeps(), npmOverrides()),
+      unmanagedDeps()
+    )
     val optional = BunToolchainModule.dependencyPairs(npmOptionalDeps() ++ bunOptionalDeps(), npmOverrides())
     val base = ujson.Obj(
       "name" -> defaultPackageName,
@@ -85,6 +88,7 @@ trait BunPublishModule extends BunScalaJSModule {
     requireBunLockfile(hasRuntimeInputs, lockfile, bunRequireLockfile())
     copyBunLockfile(lockfile, dest)
     if hasRuntimeInputs then
+      BunToolchainModule.stageUnmanagedDeps(unmanagedDeps(), dest)
       runBun(
         bunExecutable(),
         Seq("install") ++ resolvedBunInstallArgs(
@@ -92,7 +96,7 @@ trait BunPublishModule extends BunScalaJSModule {
           bunInstallExtraArgs(),
           lockfile.nonEmpty,
           updateLockfile = false
-        ) ++ unmanagedDeps().map(_.path.toString),
+        ),
         cwd = dest,
         env = bunEnv()
       )

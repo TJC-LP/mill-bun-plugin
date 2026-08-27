@@ -151,6 +151,47 @@ object BunToolchainTests extends TestSuite:
       assert(os.read(cached) == "bun-binary")
       assert(os.list(cached / os.up) == Seq(cached))
 
+    test("unmanaged deps become file: specifiers under vendor"):
+      val dep = os.temp.dir() / "local-lib"
+      os.write(dep / "package.json", """{"name":"local-lib","version":"1.0.0"}""", createFolders = true)
+      val scoped = os.temp.dir() / "scoped"
+      os.write(scoped / "package.json", """{"name":"@acme/util","version":"2.0.0"}""", createFolders = true)
+
+      val pairs = BunToolchainModule.unmanagedDependencyPairs(Seq(mill.api.PathRef(dep), mill.api.PathRef(scoped)))
+      assert(pairs == Seq(
+        "@acme/util" -> ujson.Str("file:./vendor/acme+util"),
+        "local-lib" -> ujson.Str("file:./vendor/local-lib")
+      ))
+
+    test("unmanaged dep without a package.json fails with guidance"):
+      val dep = os.temp.dir() / "raw"
+      os.makeDir.all(dep)
+      val err = intercept[IllegalArgumentException] {
+        BunToolchainModule.unmanagedDependencyPairs(Seq(mill.api.PathRef(dep)))
+      }
+      assert(err.getMessage.contains("package.json"))
+
+    test("a name declared both as npm dep and unmanaged dep is rejected"):
+      val dep = os.temp.dir() / "local-react"
+      os.write(dep / "package.json", """{"name":"react","version":"1.0.0"}""", createFolders = true)
+      val err = intercept[IllegalArgumentException] {
+        BunToolchainModule.dependencyPairsWithUnmanaged(
+          BunToolchainModule.dependencyPairs(Seq("react@^19.0.0")),
+          Seq(mill.api.PathRef(dep))
+        )
+      }
+      assert(err.getMessage.contains("react"))
+
+    test("staging copies packages into vendor and skips their node_modules"):
+      val dep = os.temp.dir() / "local-lib"
+      os.write(dep / "package.json", """{"name":"local-lib","version":"1.0.0"}""", createFolders = true)
+      os.write(dep / "node_modules" / "junk" / "package.json", "{}", createFolders = true)
+
+      val root = os.temp.dir()
+      BunToolchainModule.stageUnmanagedDeps(Seq(mill.api.PathRef(dep)), root)
+      assert(os.exists(root / "vendor" / "local-lib" / "package.json"))
+      assert(!os.exists(root / "vendor" / "local-lib" / "node_modules"))
+
     test("computes SHA-256"):
       val file = os.temp(contents = "hello")
       assert(

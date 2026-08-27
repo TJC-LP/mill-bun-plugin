@@ -238,6 +238,26 @@ object BunTypeScriptIntegrationTests extends TestSuite {
       assert(tester.eval("app.test.test").isSuccess)
     }
 
+    test("unmanaged local packages install under a frozen lockfile") {
+      // Positional install paths turned `bun install` into `bun add`, which --frozen-lockfile
+      // unconditionally rejects — unmanagedDeps never worked against a lockfile at all.
+      val tester = this.tester("typescript-unmanaged")
+      assert(tester.eval("app.bunLock").isSuccess)
+      val lock = os.read(tester.workspacePath / "bun.lock")
+      assert(lock.contains("file:vendor/local-lib"))
+      // The lock must not record where this repository happens to be checked out.
+      assert(!lock.contains(tester.workspacePath.toString))
+
+      assert(tester.eval("app.npmInstall").isSuccess)
+      val installed = outputPath(tester, "app.npmInstall")
+      assert(os.exists(installed / "node_modules" / "local-lib" / "package.json"))
+
+      assert(tester.eval("app.bundle").isSuccess)
+      val bundle = outputPath(tester, "app.bundle")
+      val run = os.call(Seq("bun", bundle.toString))
+      assert(run.out.text().contains("hello from local-lib"))
+    }
+
     test("test modules adding nothing reuse the outer install") {
       // A bare test module must not demand a second lockfile.
       val tester = this.tester("typescript-tests")
