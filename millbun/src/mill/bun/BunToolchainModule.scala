@@ -315,12 +315,19 @@ object BunToolchainModule {
     ))
     parsed.groupBy(_.name).toSeq.sortBy(_._1).map { case (name, entries) =>
       val specifiers = entries.map(_.specifier).distinct
-      val resolved = overrides.get(name).orElse(specifiers match {
+      // "latest" is only the placeholder for an unversioned declaration, so any explicit
+      // specifier wins over it: without this, one unversioned dep in a published library would
+      // hard-conflict with every consumer that pins a version. Two DIFFERENT explicit
+      // specifiers (even semantically overlapping ones like ^19 and ^19.0.0) still fail
+      // deterministically rather than resolving by declaration order.
+      val explicit = specifiers.filterNot(_ == "latest")
+      val candidates = if (explicit.nonEmpty) explicit else specifiers
+      val resolved = overrides.get(name).orElse(candidates match {
         case Seq(specifier) => Some(specifier)
         case _ => None
       }).getOrElse(
         throw new IllegalArgumentException(
-          s"Conflicting npm dependency '$name': ${specifiers.sorted.mkString(", ")}. " +
+          s"Conflicting npm dependency '$name': ${explicit.sorted.mkString(", ")}. " +
             "Declare npmOverrides to select one specifier."
         )
       )

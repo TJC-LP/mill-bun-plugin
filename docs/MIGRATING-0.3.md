@@ -46,7 +46,9 @@ override def bunBundleFormat = Task { Some("esm") }
 
 0.2 resolved the same package declared with different specifiers last-wins. 0.3 fails
 deterministically for **all** generated package.json files — direct declarations, module-graph
-aggregation, and classpath manifests alike. Resolve with `npmOverrides`:
+aggregation, and classpath manifests alike. Unversioned declarations are the one exception: they
+resolve to `latest`, and an explicit specifier for the same package wins over `latest` instead
+of conflicting. Resolve genuine conflicts with `npmOverrides`:
 
 ```scala
 override def npmOverrides = Task { Map("react" -> "^19.0.0") }

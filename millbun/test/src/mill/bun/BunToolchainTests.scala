@@ -261,6 +261,27 @@ object BunToolchainTests extends TestSuite:
       )
       assert(pairs.map((name, version) => name -> version.str) == Seq("react" -> "19.1.1"))
 
+    test("an explicit specifier wins over an unversioned declaration"):
+      // "latest" is only the placeholder for a missing version. Without this yield, one
+      // unversioned dep in a published library conflicts with every consumer that pins.
+      val pairs = BunToolchainModule.dependencyPairs(Seq("react", "react@^19.0.0"))
+      assert(pairs.map((name, version) => name -> version.str) == Seq("react" -> "^19.0.0"))
+
+      // Order-independent, and multiple latests collapse into the one explicit winner.
+      val reversed = BunToolchainModule.dependencyPairs(Seq("react@^19.0.0", "react", "react"))
+      assert(reversed.map((name, version) => name -> version.str) == Seq("react" -> "^19.0.0"))
+
+      // Only-unversioned still resolves to latest.
+      val bare = BunToolchainModule.dependencyPairs(Seq("react", "react"))
+      assert(bare.map((name, version) => name -> version.str) == Seq("react" -> "latest"))
+
+      // Two different explicit specifiers still conflict, with latest absent from the message.
+      val error = intercept[IllegalArgumentException](
+        BunToolchainModule.dependencyPairs(Seq("react", "react@^18", "react@^19"))
+      )
+      assert(error.getMessage.contains("Conflicting npm dependency 'react'"))
+      assert(!error.getMessage.contains("latest"))
+
     test("malformed dependency declarations fail clearly"):
       Seq("", "react@", "@types", "@types/bun@").foreach: input =>
         intercept[IllegalArgumentException](BunToolchainModule.splitDep(input))

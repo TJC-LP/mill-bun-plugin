@@ -125,7 +125,7 @@ The dependency model is shared across Scala.js and TypeScript:
 | `npmOverrides` | Explicit resolution for otherwise conflicting declarations |
 | `bunPackageJsonExtras` | Unmodeled fields such as `scripts`; typed dependency fields are rejected here |
 
-The `bun"pkg@specifier"` interpolator is an optional compile-time validator for dependency strings. Unversioned dependencies resolve explicitly to `latest`; contradictory requirements fail unless selected by `npmOverrides`.
+The `bun"pkg@specifier"` interpolator is an optional compile-time validator for dependency strings. Unversioned dependencies resolve explicitly to `latest`, and an explicit specifier wins over `latest` for the same package; contradictory explicit requirements fail unless selected by `npmOverrides`.
 
 ## Managed Bun
 
