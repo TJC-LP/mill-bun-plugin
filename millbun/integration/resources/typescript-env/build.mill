@@ -11,7 +11,10 @@ import mill.javascriptlib.bun.*
 object app extends BunTypeScriptModule {
   override def moduleDir = build.moduleDir
   override def npmDevDeps = Task { Seq("typescript@5.7.3") }
-  def bunProxy = Task.Source(moduleDir / "bun-proxy")
+  // The sh proxy cannot execute on Windows, so the fixture carries a .cmd twin.
+  def bunProxy = Task.Source(
+    if (scala.util.Properties.isWin) moduleDir / "bun-proxy.cmd" else moduleDir / "bun-proxy"
+  )
   override def managedBunExecutable = Task { Some(PathRef(bunProxy().path)) }
   // The proxy execs whatever Bun is on PATH, so its --version reports the developer's Bun rather
   // than bunVersion. This fixture tests env propagation, not the version pin.
