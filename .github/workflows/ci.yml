@@ -84,3 +84,37 @@ jobs:
         env:
           MILL_BUN_USE_SYSTEM: 'false'
         run: $MILL --no-server millbun.integration.testOnly mill.bun.BunManagedToolchainIntegrationTests
+
+  examples:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/mill-bun
+          key: mill-bun-${{ runner.os }}-${{ hashFiles('millbun/src/mill/bun/BunToolchainModule.scala') }}
+
+      # Publish at whatever version the examples pin, so a release-version sweep cannot
+      # silently desynchronize this leg.
+      - name: Publish the plugin locally
+        run: |
+          V=$(grep -o 'mill-bun_mill1:[0-9][0-9.]*' example-typescript/build.mill | cut -d: -f2)
+          PUBLISH_VERSION=$V ./mill --no-server millbun.publishLocal
+
+      - name: example-typescript
+        run: cd example-typescript && ./mill --no-server app.run && ./mill --no-server app.test.testForked
+
+      - name: example-scalajs
+        run: cd example-scalajs && ./mill --no-server app.run && ./mill --no-server app.test.testForked
+
+      - name: examples project compiles
+        run: cd examples && ./mill --no-server __.compile

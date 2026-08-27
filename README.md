@@ -200,8 +200,15 @@ The older Scala.js `bunBundle*` and `bunCompile*` names remain as compatibility 
 ```bash
 ./mill --no-server millbun.compile
 ./mill --no-server millbun.test
-MILL_BUN_USE_SYSTEM=true MILL_BUN_REQUIRE_LOCKFILE=false \
-  ./mill --no-server millbun.integration
+./mill --no-server millbun.integration
+```
+
+The integration suite runs the shipped defaults: the managed Bun toolchain and strict lockfiles
+against each fixture's committed `bun.lock`. Export `MILL_BUN_USE_SYSTEM=true` to run against a
+local Bun instead, and regenerate every fixture lock after a dependency-default change with:
+
+```bash
+MILL_BUN_REGENERATE_LOCKS=1 ./mill --no-server millbun.integration.testOnly mill.bun.RegenerateFixtureLocks
 ```
 
 See [the 0.3 migration guide](docs/MIGRATING-0.3.md), the runnable `example-*` projects, and [the release runbook](docs/RELEASING.md).

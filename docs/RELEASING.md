@@ -59,12 +59,6 @@ Run the same checks the release workflow relies on:
 ./mill --no-server millbun.publishLocal
 ```
 
-If you switch `PUBLISH_VERSION` values in the same checkout, clear the cached publish metadata first:
-
-```bash
-./mill --no-server clean millbun.publishVersion millbun.publishArtifacts
-```
-
 Verify there are no remaining snapshot references in release-facing files:
 
 ```bash
@@ -110,6 +104,9 @@ After the workflow succeeds:
 Expected artifact:
 
 - `com.tjclp:mill-bun_mill1_3:X.Y.Z`
+
+The `_3` suffix is correct, not a typo: it is Mill's Scala 3 artifact mangling. Build headers
+write `com.tjclp::mill-bun_mill1`, and the `::` shorthand resolves to this artifact id.
 
 ## GPG Setup
 
