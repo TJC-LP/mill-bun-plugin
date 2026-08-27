@@ -5,7 +5,7 @@ This document describes how to publish `mill-bun-plugin` to Maven Central and cr
 ## Overview
 
 - Releases are triggered by pushing a semver tag like `v0.1.0` or `v0.1.0-RC1`.
-- The release workflow injects `PUBLISH_VERSION` from the tag, then runs `millbun.compile`, `millbun.test`, `millbun.integration`, and the Maven Central publish step.
+- The release workflow injects `PUBLISH_VERSION` from the tag for the compile, unit test, and publish steps. The integration step deliberately runs **without** `PUBLISH_VERSION`: fixtures pin `0.0.0-NIGHTLY` against `publishLocalTestRepo`, and injecting the release version there would republish the test repo at the wrong version and break every fixture resolution. Do not "fix" that inconsistency.
 - If the tag is annotated, the tag message is used as the GitHub release body. Otherwise GitHub generates release notes automatically.
 
 ## Prerequisites

@@ -11,5 +11,9 @@ import mill.javascriptlib.bun.*
 object app extends BunTypeScriptModule {
   override def moduleDir = build.moduleDir
 
-  object test extends BunTypeScriptTests
+  object test extends BunTypeScriptTests {
+    // The test-side env lever: overriding forkEnv here compiles but is ignored (only upstream's
+    // Node runners read it), and outer bunRuntimeEnv would also change `run`.
+    override def bunTestEnv = Task { super.bunTestEnv() + ("BUN_TEST_MARKER" -> "set") }
+  }
 }

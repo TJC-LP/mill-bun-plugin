@@ -203,7 +203,10 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule with BunPac
     val allOptional = BunToolchainModule.dependencyPairs(transitiveNpmOptionalDeps(), overrides)
     val allPeers = BunToolchainModule.dependencyPairs(transitiveNpmPeerDeps(), overrides)
     val base = ujson.Obj(
-      "name" -> defaultPackageName,
+      // bunWorkspacePackageName, not the raw default: the workspace layout names directories
+      // and detects duplicates by it, so the manifest must carry the same identity or an
+      // override satisfies the guard while bun still sees the colliding default names.
+      "name" -> bunWorkspacePackageName(),
       "private" -> true,
       "version" -> "0.0.0",
       "dependencies" -> ujson.Obj.from(BunToolchainModule.dependencyPairsWithUnmanaged(
@@ -486,7 +489,10 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule with BunPac
     resolvedBunConfigs().foreach(cfg => os.copy.over(cfg.path, buildDir / cfg.path.last, createFolders = true))
     copyCompileResources(bunCompileResources(), buildDir)
 
-    val outFile = Task.dest / bunBinaryName()
+    // bun appends .exe to extensionless --compile outputs on Windows; the recorded PathRef
+    // must name the file bun actually writes, or downstream copies fail and caching never
+    // invalidates (a missing path's signature is constant).
+    val outFile = Task.dest / (bunBinaryName() + (if (scala.util.Properties.isWin) ".exe" else ""))
     val entry = primaryEntrypoint(linked).relativeTo(linked.dest.path).toString
     val formatArgs = bunBundleFormat().toSeq.flatMap(fmt => Seq("--format", fmt))
     val sourcemapArgs = bunBundleSourcemap().toSeq.map(mode => s"--sourcemap=$mode")

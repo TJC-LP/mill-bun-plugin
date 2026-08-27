@@ -22,6 +22,7 @@ Bun does not need to be installed. The plugin downloads and checksum-verifies Bu
 package build
 
 import mill.*
+import mill.scalalib.*
 import mill.bun.bun
 import mill.scalajslib.api.*
 import mill.scalajslib.bun.*
@@ -34,7 +35,10 @@ object app extends BunScalaJSModule {
   override def moduleKind = Task { ModuleKind.ESModule }
   override def npmDeps = Task { Seq(bun"lodash@^4.17.21") }
 
-  object test extends BunScalaJSTests, TestModule.Utest
+  object test extends BunScalaJSTests, TestModule.Utest {
+    def mvnDeps = Seq(mvn"com.lihaoyi::utest::0.8.5")
+    def testFramework = "utest.runner.Framework"
+  }
 }
 ```
 
@@ -148,6 +152,8 @@ Set `bunArchiveUrl` as well to download from a mirror; a mirror always requires 
 
 ```scala
 import mill.bun.*
+import mill.javascriptlib.bun.*
+import mill.scalajslib.bun.*
 
 object scalaApp extends BunScalaJSModule {
   def scalaVersion = "3.8.2"

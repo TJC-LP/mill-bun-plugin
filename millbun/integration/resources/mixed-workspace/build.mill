@@ -12,6 +12,9 @@ import mill.scalajslib.api.*
 import mill.scalajslib.bun.*
 
 object scalaApp extends BunScalaJSModule {
+  // Renamed deliberately: the layout's directory naming, duplicate guard, AND the generated
+  // member manifest must all follow this name, or bun sees a different identity than Mill.
+  override def bunWorkspacePackageName = Task { "scala-app-renamed" }
   def scalaVersion = "3.8.2"
   def scalaJSVersion = "1.22.0"
   override def moduleKind = Task { ModuleKind.ESModule }

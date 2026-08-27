@@ -92,7 +92,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
 
     val resolved = ujson.Obj.from(
       user.copy(
-        name = if (user.name.nonEmpty) user.name else moduleName,
+        name = if (user.name.nonEmpty) user.name else bunWorkspacePackageName(),
         version = if (user.version.nonEmpty) user.version else "1.0.0",
         `type` = if (enableEsm()) "module" else user.`type`,
         dependencies = ujson.Obj.from(BunToolchainModule.dependencyPairsWithUnmanaged(
@@ -329,7 +329,10 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
     val compileDir = compile().path
     val buildDir = Task.dest / "workspace"
     val mainFile = resolvedEntrypoint(mainFilePath(), compileDir).relativeTo(compileDir).toString
-    val outFile = Task.dest / bunBinaryName()
+    // bun appends .exe to extensionless --compile outputs on Windows; the recorded PathRef
+    // must name the file bun actually writes, or downstream copies fail and caching never
+    // invalidates (a missing path's signature is constant).
+    val outFile = Task.dest / (bunBinaryName() + (if (scala.util.Properties.isWin) ".exe" else ""))
 
     // Declared explicitly: the staged tree carries a node_modules symlink into this
     // install, and Mill's filesystem checker only permits reading a dest we depend on.
@@ -429,6 +432,16 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
      * on, every bare test module demanded its own lockfile.
      */
     override def tsDeps: T[Seq[String]] = Task { outer.tsDeps() }
+
+    /**
+     * Runtime environment for `bun test` processes, overridable per test module.
+     *
+     * `override def forkEnv` on a test object compiles but is silently ignored here (only
+     * upstream's Node-based runners read it), and `bunRuntimeEnv` lives on the outer module
+     * where overriding it also changes `run`. This is the test-side lever, mirroring the
+     * Scala.js `bunTestJsEnv`.
+     */
+    def bunTestEnv: T[Map[String, String]] = Task { outer.bunRuntimeEnv() }
 
     /** Test timeout in milliseconds. 0 means no timeout. */
     def bunTestTimeout: T[Int] = Task { 0 }
@@ -615,7 +628,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
       os.call(
         Seq(bunExecutable(), "test") ++ resolvedTestFlags() ++ args.value,
         cwd = preparedTestWorkspace().path,
-        env = outer.bunRuntimeEnv(),
+        env = bunTestEnv(),
         stdout = os.Inherit,
         stderr = os.Inherit
       )
@@ -626,7 +639,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
       os.call(
         Seq(bunExecutable(), "test") ++ resolvedTestFlags() ++ args.value,
         cwd = preparedTestWorkspace().path,
-        env = outer.bunRuntimeEnv(),
+        env = bunTestEnv(),
         stdout = os.Inherit,
         stderr = os.Inherit
       )
@@ -637,7 +650,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
       os.call(
         Seq(bunExecutable(), "test", "--watch") ++ resolvedTestFlags() ++ args.value,
         cwd = preparedTestWorkspace().path,
-        env = outer.bunRuntimeEnv(),
+        env = bunTestEnv(),
         stdout = os.Inherit,
         stderr = os.Inherit
       )
@@ -648,7 +661,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
       os.call(
         Seq(bunExecutable(), "test", "--update-snapshots") ++ resolvedTestFlags() ++ args.value,
         cwd = preparedTestWorkspace().path,
-        env = outer.bunRuntimeEnv(),
+        env = bunTestEnv(),
         stdout = os.Inherit,
         stderr = os.Inherit
       )
@@ -669,7 +682,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
           coverageDir.toString
         ) ++ coverageReporterArgs ++ resolvedTestFlags() ++ args.value,
         cwd = preparedTestWorkspace().path,
-        env = outer.bunRuntimeEnv(),
+        env = bunTestEnv(),
         stdout = os.Inherit,
         stderr = os.Inherit
       )
@@ -691,7 +704,7 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
           coverageDir.toString
         ) ++ coverageReporterArgs ++ resolvedTestFlags(),
         cwd = preparedTestWorkspace().path,
-        env = outer.bunRuntimeEnv()
+        env = bunTestEnv()
       )
 
       PathRef(coverageDir)

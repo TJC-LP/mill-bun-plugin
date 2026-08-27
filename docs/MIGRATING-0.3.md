@@ -42,6 +42,16 @@ override def bunBundleFormat = Task { "esm" }
 override def bunBundleFormat = Task { Some("esm") }
 ```
 
+### Contradictory npm declarations fail every install, not just publishing
+
+0.2 resolved the same package declared with different specifiers last-wins. 0.3 fails
+deterministically for **all** generated package.json files — direct declarations, module-graph
+aggregation, and classpath manifests alike. Resolve with `npmOverrides`:
+
+```scala
+override def npmOverrides = Task { Map("react" -> "^19.0.0") }
+```
+
 ### Local packages via `unmanagedDeps` must be directories with a `package.json`
 
 Entries are staged into `vendor/` beside the generated package.json and declared as

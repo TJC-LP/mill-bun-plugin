@@ -515,7 +515,9 @@ trait BunToolchainModule extends Module {
   def bunUseMusl: T[Boolean] = Task.Input { BunToolchainModule.detectMusl() }
 
   /** Resolve Bun from PATH instead of using the managed distribution. */
-  def bunUseSystem: T[Boolean] = Task {
+  // Task.Input: a plain Task caches the first-seen env value until a manual clean, so toggling
+  // MILL_BUN_USE_SYSTEM between runs — the documented workflow — would be silently ignored.
+  def bunUseSystem: T[Boolean] = Task.Input {
     Task.env.get("MILL_BUN_USE_SYSTEM").exists(_.equalsIgnoreCase("true"))
   }
 
@@ -578,7 +580,9 @@ trait BunToolchainModule extends Module {
   }
 
   /** Require dependency-bearing modules to provide [[bunLockfile]]. */
-  def bunRequireLockfile: T[Boolean] = Task {
+  // Task.Input for the same reason as bunUseSystem: MIGRATING-0.3 tells users mid-migration to
+  // set MILL_BUN_REQUIRE_LOCKFILE=false, which must take effect on a warm out/ directory.
+  def bunRequireLockfile: T[Boolean] = Task.Input {
     !Task.env.get("MILL_BUN_REQUIRE_LOCKFILE").exists(_.equalsIgnoreCase("false"))
   }
 

@@ -19,7 +19,7 @@ object BunWorkspaceIntegrationTests extends BunIntegrationSuite:
       assert(os.read(workspaceInstall / ".workspace-installed").contains("--frozen-lockfile"))
       val rootJson = ujson.read(os.read(workspaceInstall / "package.json"))
       assert(rootJson("workspaces").arr.map(_.str).toSet == Set(
-        "packages/scalaApp",
+        "packages/scala-app-renamed",
         "packages/typescriptApp"
       ))
       assert(os.exists(workspaceInstall / "node_modules" / "is-even" / "package.json"))
@@ -28,9 +28,12 @@ object BunWorkspaceIntegrationTests extends BunIntegrationSuite:
       // Unmanaged local packages arrive as file: specifiers with vendor trees staged beside the
       // member's package.json — never as positional install args, which turn `bun install` into
       // `bun add` and are unconditionally rejected by --frozen-lockfile.
-      val scalaJson = ujson.read(os.read(workspaceInstall / "packages" / "scalaApp" / "package.json"))
+      val scalaJson = ujson.read(os.read(workspaceInstall / "packages" / "scala-app-renamed" / "package.json"))
+      // The manifest identity must be the workspace package name, not the module's default —
+      // otherwise a rename satisfies Mill's duplicate guard while bun still sees collisions.
+      assert(scalaJson("name").str == "scala-app-renamed")
       assert(scalaJson("dependencies").obj("shared-local").str == "file:./vendor/shared-local")
-      assert(os.exists(workspaceInstall / "packages" / "scalaApp" / "vendor" / "shared-local" / "package.json"))
+      assert(os.exists(workspaceInstall / "packages" / "scala-app-renamed" / "vendor" / "shared-local" / "package.json"))
       assert(!os.read(workspaceInstall / ".workspace-installed").contains("shared-local"))
 
       val scalaResult = tester.eval("scalaApp.bunInstall")
