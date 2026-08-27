@@ -101,6 +101,26 @@ object BunVendoredNodeModulesTests extends TestSuite {
       assert(err.getMessage.contains("Vendored Bun bundle conflict"))
     }
 
+    test("jar entries that climb out of the bundle root are refused") {
+      // Zip-slip: a hostile dependency jar carrying the vendored marker plus a `..` entry must
+      // never become a file write outside the destination — this runs during bunInstall for any
+      // module whose classpath contains the jar, without executing any dependency code.
+      val jarPath = tempJar(
+        Map(
+          s"${BunVendoredNodeModules.BundleRoot}/react/package.json" -> """{"name":"react"}""",
+          s"${BunVendoredNodeModules.BundleRoot}/../../../escaped.txt" -> "outside"
+        )
+      )
+      val destRoot = os.temp.dir()
+
+      val err = intercept[RuntimeException] {
+        BunVendoredNodeModules.mergeFromClasspathEntry(jarPath, destRoot / "node_modules")
+      }
+      assert(err.getMessage.contains("escapes its root"))
+      assert(!os.walk(destRoot).exists(_.last == "escaped.txt"))
+      assert(!os.exists(destRoot / os.up / "escaped.txt"))
+    }
+
     test("merging through a symlinked destination is refused") {
       // In workspace mode node_modules links into the shared install's Task.dest. Merging
       // through it would silently mutate a directory every workspace member depends on.
@@ -130,10 +150,11 @@ object BunVendoredNodeModulesTests extends TestSuite {
   private def tempJar(entries: Map[String, String]): os.Path = {
     val jarPath = os.temp.dir() / "bundle.jar"
     val jarOut = new JarOutputStream(new FileOutputStream(jarPath.toIO))
+    val written = scala.collection.mutable.Set.empty[String]
     try
       entries.toSeq.sortBy(_._1).foreach { case (path, content) =>
         val parentDirs = parentDirectories(path)
-        parentDirs.foreach { dir =>
+        parentDirs.filter(written.add).foreach { dir =>
           jarOut.putNextEntry(new JarEntry(dir))
           jarOut.closeEntry()
         }

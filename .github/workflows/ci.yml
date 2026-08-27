@@ -107,7 +107,7 @@ jobs:
       # silently desynchronize this leg.
       - name: Publish the plugin locally
         run: |
-          V=$(grep -o 'mill-bun_mill1:[0-9][0-9.]*' example-typescript/build.mill | cut -d: -f2)
+          V=$(grep -o 'mill-bun_mill1:[0-9][-0-9A-Za-z.]*' example-typescript/build.mill | cut -d: -f2)
           PUBLISH_VERSION=$V ./mill --no-server millbun.publishLocal
 
       - name: example-typescript

@@ -55,6 +55,7 @@ object BunTypeScriptIntegrationTests extends BunIntegrationSuite {
       assert(res.isSuccess)
 
       val executable = outputPath(tester, "app.compileExecutable")
+      assert(os.isFile(executable))
       val run = os.call(
         Seq(executable.toString),
         cwd = executable / os.up
@@ -92,6 +93,26 @@ object BunTypeScriptIntegrationTests extends BunIntegrationSuite {
       assert(installResult.isSuccess)
       val args = os.read(tester.workspacePath / "out" / "app" / "bunInstall.dest" / ".bun-args")
       assert(args.contains("--frozen-lockfile"))
+    }
+
+    test("lockfile requirement toggles between runs on a warm out directory") {
+      // bunRequireLockfile reads MILL_BUN_REQUIRE_LOCKFILE inside Task.Input: a plain Task
+      // caches the first-seen value, so the documented mid-migration escape hatch
+      // (MILL_BUN_REQUIRE_LOCKFILE=false) was silently ignored after one strict run.
+      // Forked evals, because only a subprocess sees a per-eval env.
+      val tester = new IntegrationTester(
+        daemonMode = false,
+        workspaceSourcePath = resourceDir / "typescript-simple",
+        millExecutable = millExe,
+        useInMemory = false
+      )
+      // typescript-simple ships a committed lock; remove it from the copy so the strict default
+      // has something to reject. (typescript-lock is unsuitable here: it pins the requirement.)
+      os.remove(tester.workspacePath / "bun.lock")
+      val strict = tester.eval("app.bunInstall", env = Map("MILL_BUN_REQUIRE_LOCKFILE" -> "true"))
+      assert(!strict.isSuccess)
+      val relaxed = tester.eval("app.bunInstall", env = Map("MILL_BUN_REQUIRE_LOCKFILE" -> "false"))
+      assert(relaxed.isSuccess)
     }
 
     test("a lockfile from a newer Bun fails with regeneration guidance") {

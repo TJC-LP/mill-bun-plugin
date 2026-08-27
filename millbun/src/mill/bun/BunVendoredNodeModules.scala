@@ -84,9 +84,16 @@ object BunVendoredNodeModules:
       if entries.isEmpty then return false
 
       entries.sortBy(_.getName).foreach { entry =>
-        val relString = entry.getName.stripPrefix(prefix)
+        // Normalize the separators some zip writers use, then refuse entries that climb out of
+        // the bundle root: a hostile jar with `META-INF/bun/node_modules/../../x` must never
+        // become a write outside the destination (zip-slip).
+        val relString = entry.getName.replace('\\', '/').stripPrefix(prefix)
         if relString.nonEmpty then
           val rel = os.RelPath(relString)
+          if rel.ups != 0 then
+            throw new RuntimeException(
+              s"Vendored Bun bundle entry escapes its root in $jarPath: ${entry.getName}"
+            )
           if !shouldSkip(rel.toNIO) then
             val dest = destNodeModules / rel
             val sourceLabel = s"$jarPath!/${entry.getName}"

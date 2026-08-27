@@ -20,6 +20,11 @@ import mill.scalajslib.api.ModuleKind
   */
 trait BunPublishModule extends BunScalaJSModule {
 
+  // Declared as a source: a plain read of workspaceRoot/.npmrc trips Mill's filesystem checker
+  // the moment the file exists (exactly the private-registry case vendoring needs), and an
+  // undeclared read would never invalidate this task when the file changes.
+  private def publishNpmRc = Task.Source(BuildCtx.workspaceRoot / ".npmrc")
+
   /** Embed resolved `node_modules` into published artifacts.
     *
     * Disabled by default because published JARs are cross-platform, while
@@ -56,7 +61,7 @@ trait BunPublishModule extends BunScalaJSModule {
     val dest = Task.dest
     os.makeDir.all(dest)
 
-    val npmRc = BuildCtx.workspaceRoot / ".npmrc"
+    val npmRc = publishNpmRc().path
     if (os.exists(npmRc)) os.copy.over(npmRc, dest / ".npmrc", createFolders = true)
     bunfigFiles().foreach { cfg =>
       os.copy.over(cfg.path, dest / cfg.path.last, createFolders = true)

@@ -88,6 +88,9 @@ object BunScalaJSIntegrationTests extends BunIntegrationSuite {
       assert(res.isSuccess)
 
       val executable = outputPath(tester, "app.compileExecutable")
+      // The recorded PathRef must name the file bun actually wrote — on Windows bun appends
+      // .exe, and CreateProcess would happily run an extensionless path that does not exist.
+      assert(os.isFile(executable))
       assert(runExecutable(executable) == "Hello from scala.js with lodash on bun")
     }
 
