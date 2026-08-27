@@ -4,29 +4,7 @@ import mill.api.PathRef
 import mill.testkit.IntegrationTester
 import utest._
 
-object BunScalaJSIntegrationTests extends TestSuite {
-  val resourceDir: os.Path = os.Path(sys.env("MILL_WORKSPACE_ROOT")) / "millbun" / "integration" / "resources"
-  val millExe: os.Path = os.Path(sys.env("MILL_EXECUTABLE_PATH"))
-
-  private def tester(resource: String): IntegrationTester =
-    new IntegrationTester(
-      daemonMode = false,
-      workspaceSourcePath = resourceDir / resource,
-      millExecutable = millExe,
-      useInMemory = true
-    )
-
-  private def outputPath(tester: IntegrationTester, selector: String): os.Path =
-    tester.out(selector).value[PathRef].path
-
-  private def commandLogPath(tester: IntegrationTester, selector: String): os.Path = {
-    val segments = selector.split('.')
-    val rel =
-      if (segments.length <= 1) os.RelPath(".")
-      else os.RelPath(segments.dropRight(1).mkString("/"))
-    tester.workspacePath / "out" / rel / s"${segments.last}.log"
-  }
-
+object BunScalaJSIntegrationTests extends BunIntegrationSuite {
   private def bundledScript(dist: os.Path): os.Path =
     os.walk(dist)
       .find(path => os.isFile(path) && path.ext == "js")

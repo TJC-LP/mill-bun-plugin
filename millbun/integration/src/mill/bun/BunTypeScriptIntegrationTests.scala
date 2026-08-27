@@ -4,29 +4,7 @@ import mill.api.PathRef
 import mill.testkit.IntegrationTester
 import utest._
 
-object BunTypeScriptIntegrationTests extends TestSuite {
-  val resourceDir: os.Path = os.Path(sys.env("MILL_WORKSPACE_ROOT")) / "millbun" / "integration" / "resources"
-  val millExe: os.Path = os.Path(sys.env("MILL_EXECUTABLE_PATH"))
-
-  private def tester(resource: String): IntegrationTester =
-    new IntegrationTester(
-      daemonMode = false,
-      workspaceSourcePath = resourceDir / resource,
-      millExecutable = millExe,
-      useInMemory = true
-    )
-
-  private def outputPath(tester: IntegrationTester, selector: String): os.Path =
-    tester.out(selector).value[PathRef].path
-
-  private def commandLogPath(tester: IntegrationTester, selector: String): os.Path = {
-    val segments = selector.split('.')
-    val rel =
-      if (segments.length <= 1) os.RelPath(".")
-      else os.RelPath(segments.dropRight(1).mkString("/"))
-    tester.workspacePath / "out" / rel / s"${segments.last}.log"
-  }
-
+object BunTypeScriptIntegrationTests extends BunIntegrationSuite {
   def tests: Tests = Tests {
 
     test("compile") {
@@ -82,6 +60,23 @@ object BunTypeScriptIntegrationTests extends TestSuite {
         cwd = executable / os.up
       )
       assert(run.out.text().trim == "Hello from compiled TypeScript executable!")
+
+      // BunSQLiteModule feeds discovered databases into the compile workspace, alongside the
+      // module's own bunCompileResources (which must chain through super to keep them).
+      val workspace = tester.workspacePath / "out" / "app" / "compileExecutable.dest" / "workspace"
+      assert(os.exists(workspace / "data" / "app.db"))
+    }
+
+    test("npmOverrides resolves conflicting transitive specifiers") {
+      // lib pins is-odd@^3.0.0 and app pins is-odd@3.0.1 — without the override this install
+      // fails with the deterministic conflict error; npmOverrides is the escape hatch.
+      val tester = this.tester("typescript-overrides")
+      assert(tester.eval("app.bunInstall").isSuccess)
+
+      val packageJson = ujson.read(os.read(outputPath(tester, "app.bunInstall") / "package.json"))
+      assert(packageJson("dependencies").obj("is-odd").str == "3.0.1")
+      assert(packageJson("overrides").obj("is-odd").str == "3.0.1")
+      assert(os.exists(outputPath(tester, "app.bunInstall") / "node_modules" / "is-odd" / "package.json"))
     }
 
     test("strict installs require a source lock and bunLock creates it") {

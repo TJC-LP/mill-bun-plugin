@@ -424,67 +424,49 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule with BunPac
       )
   }
 
+  /** One body for [[bundle]] and [[bundleFast]]: they differ only in linker and bytecode. */
+  private def bundleBuild(linkTask: Task[Report], bytecode: Task[Boolean]): Task[PathRef] =
+    Task.Anon {
+      val linked = linkTask()
+
+      val outDir = Task.dest / "dist"
+      os.makeDir.all(outDir)
+
+      val formatArgs = bunBundleFormat().toSeq.flatMap(fmt => Seq("--format", fmt))
+      val sourcemapArgs = bunBundleSourcemap().toSeq.map(mode => s"--sourcemap=$mode")
+      val externalArgs = bunBundleExternal().flatMap(dep => Seq("--external", dep))
+      val splittingArgs = if (bunBundleSplitting()) Seq("--splitting") else Nil
+      val bytecodeArgs = if (bytecode()) Seq("--bytecode") else Nil
+
+      runBun(
+        bunExecutable(),
+        Seq("build") ++
+          bundleEntrypoints(linked).map(_.toString) ++
+          Seq("--outdir", outDir.toString, "--target", bunBundleTarget()) ++
+          formatArgs ++
+          sourcemapArgs ++
+          externalArgs ++
+          splittingArgs ++
+          bytecodeArgs ++
+          bunBundleArgs(),
+        cwd = linked.dest.path,
+        env = bunToolEnv()
+      )
+
+      PathRef(outDir)
+    }
+
   /** Canonical production bundle task. */
   def bundle: T[PathRef] = Task {
-    val linked = fullLinkJS()
-
-    val outDir = Task.dest / "dist"
-    os.makeDir.all(outDir)
-
-    val formatArgs = bunBundleFormat().toSeq.flatMap(fmt => Seq("--format", fmt))
-    val sourcemapArgs = bunBundleSourcemap().toSeq.map(mode => s"--sourcemap=$mode")
-    val externalArgs = bunBundleExternal().flatMap(dep => Seq("--external", dep))
-    val splittingArgs = if (bunBundleSplitting()) Seq("--splitting") else Nil
-    val bytecodeArgs = if (bunBundleBytecode()) Seq("--bytecode") else Nil
-
-    runBun(
-      bunExecutable(),
-      Seq("build") ++
-        bundleEntrypoints(linked).map(_.toString) ++
-        Seq("--outdir", outDir.toString, "--target", bunBundleTarget()) ++
-        formatArgs ++
-        sourcemapArgs ++
-        externalArgs ++
-        splittingArgs ++
-        bytecodeArgs ++
-        bunBundleArgs(),
-      cwd = linked.dest.path,
-      env = bunToolEnv()
-    )
-
-    PathRef(outDir)
+    bundleBuild(Task.Anon(fullLinkJS()), Task.Anon(bunBundleBytecode()))()
   }
 
   @deprecated("Use bundle", "0.3.0")
   def bunBundle: T[PathRef] = Task { bundle() }
 
-  /** Canonical fast-development bundle task. */
+  /** Canonical fast-development bundle task. Never bytecode-compiles: it exists for iteration speed. */
   def bundleFast: T[PathRef] = Task {
-    val linked = fastLinkJS()
-
-    val outDir = Task.dest / "dist"
-    os.makeDir.all(outDir)
-
-    val formatArgs = bunBundleFormat().toSeq.flatMap(fmt => Seq("--format", fmt))
-    val sourcemapArgs = bunBundleSourcemap().toSeq.map(mode => s"--sourcemap=$mode")
-    val externalArgs = bunBundleExternal().flatMap(dep => Seq("--external", dep))
-    val splittingArgs = if (bunBundleSplitting()) Seq("--splitting") else Nil
-
-    runBun(
-      bunExecutable(),
-      Seq("build") ++
-        bundleEntrypoints(linked).map(_.toString) ++
-        Seq("--outdir", outDir.toString, "--target", bunBundleTarget()) ++
-        formatArgs ++
-        sourcemapArgs ++
-        externalArgs ++
-        splittingArgs ++
-        bunBundleArgs(),
-      cwd = linked.dest.path,
-      env = bunToolEnv()
-    )
-
-    PathRef(outDir)
+    bundleBuild(Task.Anon(fastLinkJS()), Task.Anon(false))()
   }
 
   @deprecated("Use bundleFast", "0.3.0")

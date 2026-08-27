@@ -15,9 +15,7 @@ import mill.javascriptlib.bun.BunTypeScriptModule
  * Usage:
  * {{{
  * object app extends BunTypeScriptModule with BunWorkersModule {
- *   override def workerEntryPoints = Task {
- *     Seq(PathRef(millSourcePath / "src" / "worker.ts"))
- *   }
+ *   override def workerEntryPoints = Task.Sources(moduleDir / "src" / "worker.ts")
  * }
  * }}}
  */
