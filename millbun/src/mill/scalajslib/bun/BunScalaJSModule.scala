@@ -183,9 +183,11 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule with BunPac
 
   @deprecated("Use transitiveNpmOptionalDeps", "0.3.0")
   def transitiveBunOptionalDeps: T[Seq[String]] = Task {
-    val moduleOptional = Task.traverse(recursiveInstallBunModuleDeps)(module => Task.Anon {
-      module.npmOptionalDeps() ++ module.bunOptionalDeps()
-    })().flatten
+    val moduleOptional = Task.traverse(recursiveInstallBunModuleDeps)(module =>
+      Task.Anon {
+        module.npmOptionalDeps() ++ module.bunOptionalDeps()
+      }
+    )().flatten
     moduleOptional ++ classpathBunOptionalDeps() ++ npmOptionalDeps() ++ bunOptionalDeps()
   }
 
@@ -349,7 +351,12 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule with BunPac
     bunfigFiles()
   }
 
-  private def ensureLinkedWorkspace(report: Report, installDir: os.Path, lockfiles: Seq[String], bunConfigs: Seq[PathRef]): Unit = {
+  private def ensureLinkedWorkspace(
+      report: Report,
+      installDir: os.Path,
+      lockfiles: Seq[String],
+      bunConfigs: Seq[PathRef]
+  ): Unit = {
     val linkedDir = report.dest.path
 
     os.copy.over(installDir / "package.json", linkedDir / "package.json", createFolders = true)
@@ -521,7 +528,8 @@ trait BunScalaJSModule extends ScalaJSModule with BunToolchainModule with BunPac
    */
   def compileExecutables: T[Map[String, PathRef]] = Task {
     val targets = bunCompileTargets()
-    if (targets.isEmpty) Task.fail("bunCompileTargets is empty. Set targets like Seq(\"bun-linux-x64\", \"bun-darwin-arm64\").")
+    if (targets.isEmpty)
+      Task.fail("bunCompileTargets is empty. Set targets like Seq(\"bun-linux-x64\", \"bun-darwin-arm64\").")
 
     val linked = fullLinkJS()
     bunInstall()

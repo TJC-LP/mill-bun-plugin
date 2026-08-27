@@ -60,7 +60,8 @@ object BunDependencyManifestIntegrationTests extends BunIntegrationSuite {
       val res = tester.eval("appLocal.bunInstall")
       assert(res.isSuccess)
 
-      val packageJson = ujson.read(os.read(tester.workspacePath / "out" / "appLocal" / "bunInstall.dest" / "package.json"))
+      val packageJson =
+        ujson.read(os.read(tester.workspacePath / "out" / "appLocal" / "bunInstall.dest" / "package.json"))
       assert(packageJson("optionalDependencies").obj("optional-local").str == "^1.0.0")
     }
 
@@ -69,7 +70,8 @@ object BunDependencyManifestIntegrationTests extends BunIntegrationSuite {
       val res = tester.eval("appPublished.bunInstall")
       assert(res.isSuccess)
 
-      val packageJson = ujson.read(os.read(tester.workspacePath / "out" / "appPublished" / "bunInstall.dest" / "package.json"))
+      val packageJson =
+        ujson.read(os.read(tester.workspacePath / "out" / "appPublished" / "bunInstall.dest" / "package.json"))
       assert(!packageJson("devDependencies").obj.contains("dev-only"))
       assert(packageJson("optionalDependencies").obj("optional-published").str == "^3.0.0")
       assert(packageJson("peerDependencies").obj("peer-published").str == "^4.0.0")

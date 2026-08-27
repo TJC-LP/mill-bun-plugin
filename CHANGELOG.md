@@ -30,7 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Scala.js linking delegates to Mill's standard linker hooks; applications now choose `scalaJSVersion` explicitly.
 - Development dependencies are local tooling inputs and are no longer published transitively.
 - `bunPackageJsonExtras` rejects dependency fields now represented by typed settings.
-- Missing dependency versions are represented as `latest` instead of an empty package.json value.
+- Missing dependency versions are represented as `latest` instead of an empty package.json value,
+  and an explicit specifier wins over `latest` when the same package is declared both ways —
+  two different explicit specifiers still fail deterministically.
 - TypeScript `bunBundleFormat` is `Option[String]`, matching Scala.js; `None` lets `bun build` infer.
 - `unmanagedDeps` entries are staged into `vendor/` and declared as `file:./vendor/<name>`
   dependencies, so local packages install under frozen lockfiles and locks stay portable.

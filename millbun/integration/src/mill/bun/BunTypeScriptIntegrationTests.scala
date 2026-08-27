@@ -224,7 +224,8 @@ object BunTypeScriptIntegrationTests extends BunIntegrationSuite {
       // Test module should have is-odd in devDependencies (not dependencies)
       val testRes = tester.eval("app.test.bunInstall")
       assert(testRes.isSuccess)
-      val testPkg = ujson.read(os.read(tester.workspacePath / "out" / "app" / "test" / "bunInstall.dest" / "package.json"))
+      val testPkg =
+        ujson.read(os.read(tester.workspacePath / "out" / "app" / "test" / "bunInstall.dest" / "package.json"))
       assert(testPkg("devDependencies").obj.contains("is-odd"))
       assert(!testPkg("dependencies").obj.contains("is-odd"))
       assert(!testPkg("devDependencies").obj.contains("is-even"))

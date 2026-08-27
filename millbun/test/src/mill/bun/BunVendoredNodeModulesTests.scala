@@ -169,7 +169,7 @@ object BunVendoredNodeModulesTests extends TestSuite {
 
   private def parentDirectories(path: String): Seq[String] =
     path.split('/').dropRight(1).scanLeft("") {
-      case ("", segment) => s"$segment/"
+      case ("", segment)  => s"$segment/"
       case (acc, segment) => s"$acc$segment/"
     }.drop(1)
 }

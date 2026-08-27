@@ -129,7 +129,10 @@ private[mill] object BunWebSupport:
       os.walk(source).foreach { path =>
         val destination = target / path.relativeTo(source)
         if os.isDir(path) then os.makeDir.all(destination)
-        else if !os.exists(destination) || os.mtime(path) != os.mtime(destination) || os.size(path) != os.size(destination) then
+        else if !os.exists(destination) || os.mtime(path) != os.mtime(destination) || os.size(path) != os.size(
+            destination
+          )
+        then
           os.copy.over(path, destination, createFolders = true)
       }
     else if !os.exists(target) || os.mtime(source) != os.mtime(target) || os.size(source) != os.size(target) then

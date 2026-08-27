@@ -29,7 +29,7 @@ object BunDep:
    */
   def validate(dep: String): String =
     BunToolchainModule.parseDependency(dep) match
-      case Right(_)     => dep
+      case Right(_)      => dep
       case Left(message) => throw new IllegalArgumentException(s"Invalid bun dependency: $message")
 
 private object BunDepMacro:

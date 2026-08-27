@@ -119,7 +119,7 @@ object BunToolchainModule {
       case name if name.contains("mac") || name.contains("darwin") => Right("darwin")
       case name if name.contains("linux")                          => Right("linux")
       case name if name.contains("windows")                        => Right("windows")
-      case other => Left(s"Unsupported operating system '$other'")
+      case other                                                   => Left(s"Unsupported operating system '$other'")
     }
     val archPart = architecture.toLowerCase match {
       case "aarch64" | "arm64"        => Right("aarch64")
@@ -233,7 +233,7 @@ object BunToolchainModule {
       )
       cached
     catch
-      case _: java.nio.file.AtomicMoveNotSupportedException => publishViaCopy(staged, cached)
+      case _: java.nio.file.AtomicMoveNotSupportedException    => publishViaCopy(staged, cached)
       case scala.util.control.NonFatal(_) if os.exists(cached) =>
         // Lost the publish race. The path is keyed by the verified checksum, so the winner's
         // bytes are the right bytes. Windows reports this as a sharing violation rather than
@@ -300,7 +300,7 @@ object BunToolchainModule {
   /** Parse a dependency for compatibility with the existing public helper. */
   def splitDep(input: String): (String, ujson.Str) =
     parseDependency(input) match {
-      case Right(dep) => dep.name -> ujson.Str(dep.specifier)
+      case Right(dep)    => dep.name -> ujson.Str(dep.specifier)
       case Left(message) => throw new IllegalArgumentException(message)
     }
 
@@ -309,18 +309,27 @@ object BunToolchainModule {
       inputs: Seq[String],
       overrides: Map[String, String] = Map.empty
   ): Seq[(String, ujson.Str)] = {
-    val parsed = inputs.map(input => parseDependency(input).fold(
-      message => throw new IllegalArgumentException(message),
-      identity
-    ))
+    val parsed = inputs.map(input =>
+      parseDependency(input).fold(
+        message => throw new IllegalArgumentException(message),
+        identity
+      )
+    )
     parsed.groupBy(_.name).toSeq.sortBy(_._1).map { case (name, entries) =>
       val specifiers = entries.map(_.specifier).distinct
-      val resolved = overrides.get(name).orElse(specifiers match {
+      // "latest" is only the placeholder for an unversioned declaration, so any explicit
+      // specifier wins over it: without this, one unversioned dep in a published library would
+      // hard-conflict with every consumer that pins a version. Two DIFFERENT explicit
+      // specifiers (even semantically overlapping ones like ^19 and ^19.0.0) still fail
+      // deterministically rather than resolving by declaration order.
+      val explicit = specifiers.filterNot(_ == "latest")
+      val candidates = if (explicit.nonEmpty) explicit else specifiers
+      val resolved = overrides.get(name).orElse(candidates match {
         case Seq(specifier) => Some(specifier)
-        case _ => None
+        case _              => None
       }).getOrElse(
         throw new IllegalArgumentException(
-          s"Conflicting npm dependency '$name': ${specifiers.sorted.mkString(", ")}. " +
+          s"Conflicting npm dependency '$name': ${explicit.sorted.mkString(", ")}. " +
             "Declare npmOverrides to select one specifier."
         )
       )
