@@ -4,24 +4,10 @@ import mill.api.PathRef
 import mill.testkit.IntegrationTester
 import utest.*
 
-object BunWorkspaceIntegrationTests extends TestSuite:
-  val resourceDir: os.Path = os.Path(sys.env("MILL_WORKSPACE_ROOT")) / "millbun" / "integration" / "resources"
-  val millExe: os.Path = os.Path(sys.env("MILL_EXECUTABLE_PATH"))
-
-  private def tester(): IntegrationTester =
-    new IntegrationTester(
-      daemonMode = false,
-      workspaceSourcePath = resourceDir / "mixed-workspace",
-      millExecutable = millExe,
-      useInMemory = true
-    )
-
-  private def outputPath(tester: IntegrationTester, selector: String): os.Path =
-    tester.out(selector).value[PathRef].path
-
+object BunWorkspaceIntegrationTests extends BunIntegrationSuite:
   def tests: Tests = Tests:
     test("mixed Scala.js and TypeScript packages share one install"):
-      val tester = this.tester()
+      val tester = this.tester("mixed-workspace")
 
       val lockResult = tester.eval("workspace.bunLock")
       assert(lockResult.isSuccess)

@@ -12,9 +12,7 @@ import utest.*
  * MILL_BUN_REGENERATE_LOCKS=1 ./mill millbun.integration.testOnly mill.bun.RegenerateFixtureLocks
  * }}}
  */
-object RegenerateFixtureLocks extends TestSuite:
-  val resourceDir: os.Path = os.Path(sys.env("MILL_WORKSPACE_ROOT")) / "millbun" / "integration" / "resources"
-  val millExe: os.Path = os.Path(sys.env("MILL_EXECUTABLE_PATH"))
+object RegenerateFixtureLocks extends BunIntegrationSuite:
 
   /** Fixture -> the bunLock commands that produce its committed lockfiles. */
   val lockedFixtures: Seq[(String, Seq[String])] = Seq(
@@ -26,6 +24,7 @@ object RegenerateFixtureLocks extends TestSuite:
     "typescript-bunfig" -> Seq("app.bunLock"),
     "typescript-compile" -> Seq("app.bunLock"),
     "typescript-env" -> Seq("app.bunLock"),
+    "typescript-overrides" -> Seq("app.bunLock"),
     "typescript-simple" -> Seq("app.bunLock"),
     "typescript-tests" -> Seq("app.bunLock"),
     "typescript-tsx" -> Seq("app.bunLock"),
@@ -42,12 +41,7 @@ object RegenerateFixtureLocks extends TestSuite:
         )
       else
         lockedFixtures.foreach { case (fixture, commands) =>
-          val tester = new IntegrationTester(
-            daemonMode = false,
-            workspaceSourcePath = resourceDir / fixture,
-            millExecutable = millExe,
-            useInMemory = true
-          )
+          val tester = this.tester(fixture)
           commands.foreach { command =>
             val result = tester.eval(command)
             Predef.assert(result.isSuccess, s"$fixture: $command failed")

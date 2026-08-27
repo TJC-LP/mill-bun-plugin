@@ -4,21 +4,7 @@ import mill.api.PathRef
 import mill.testkit.IntegrationTester
 import utest.*
 
-object BunDependencyManifestIntegrationTests extends TestSuite {
-  val resourceDir: os.Path = os.Path(sys.env("MILL_WORKSPACE_ROOT")) / "millbun" / "integration" / "resources"
-  val millExe: os.Path = os.Path(sys.env("MILL_EXECUTABLE_PATH"))
-
-  private def tester(resource: String): IntegrationTester =
-    new IntegrationTester(
-      daemonMode = false,
-      workspaceSourcePath = resourceDir / resource,
-      millExecutable = millExe,
-      useInMemory = true
-    )
-
-  private def outputPath(tester: IntegrationTester, selector: String): os.Path =
-    tester.out(selector).value[PathRef].path
-
+object BunDependencyManifestIntegrationTests extends BunIntegrationSuite {
   def tests: Tests = Tests {
 
     test("invalid bun literal fails in build definitions") {
