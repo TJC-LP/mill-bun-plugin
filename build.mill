@@ -4,7 +4,18 @@ import mill.*, scalalib.*, publish.*
 import mill.api.BuildCtx
 
 object millbun extends ScalaModule, PublishModule {
+  // Compile target = the minimum Mill the plugin supports; Mill 1.x keeps plugin binary
+  // compatibility forwards, so the floor stays where it is while the suite below runs on
+  // the latest stable release.
   def millVersion = "1.1.5"
+  // The integration fixtures run Mill in-process via mill-testkit, so THIS is the Mill the
+  // plugin is tested against (fixture `//| mill-version` headers are only read for the
+  // mismatch warning). Kept at the latest stable Mill; the plugin jar under test is still
+  // the one compiled against millVersion above, i.e. the real consumer shape.
+  def millTestkitVersion = "1.1.8"
+  // Must match the Scala that Mill 1.1.x compiles build files with (3.8.2): a plugin built
+  // with a newer Scala emits TASTy that consumers' Mill cannot read. Fixtures and examples
+  // are free to use newer Scala (they are on 3.9.0 LTS); this pin is not.
   def scalaVersion = "3.8.2"
   def jvmVersion = "25"
   def platformSuffix = "_mill1"
@@ -24,7 +35,7 @@ object millbun extends ScalaModule, PublishModule {
 
   object integration extends ScalaTests, TestModule.Utest {
     def mvnDeps = Seq(
-      mvn"com.lihaoyi::mill-testkit:$millVersion",
+      mvn"com.lihaoyi::mill-testkit:$millTestkitVersion",
       mvn"com.lihaoyi::utest:0.8.5"
     )
     override def resources = Task.Sources()

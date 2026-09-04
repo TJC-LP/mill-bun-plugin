@@ -1,4 +1,4 @@
-//| mill-version: 1.1.5
+//| mill-version: 1.1.8
 //| mill-jvm-version: system
 //| mvnDeps:
 //| - com.tjclp::mill-bun_mill1:0.0.0-NIGHTLY
@@ -13,7 +13,7 @@ import mill.scalajslib.bun.*
 
 object app extends BunScalaJSWebModule {
   override def moduleDir = build.moduleDir
-  def scalaVersion = "3.8.2"
+  def scalaVersion = "3.9.0"
   def scalaJSVersion = "1.22.0"
   def mvnDeps = Seq(mvn"org.scala-js::scalajs-dom::2.8.1")
   override def npmDeps = Task { Seq("lodash@4.17.21") }
