@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The plugin's own `scalaVersion` stays at 3.8.2 on purpose and now says why in `build.mill`: it
   must match the Scala that Mill 1.1.x compiles build files with, or consumers hit a TASTy version
   error at build-script compile time.
+- Managed Bun default **1.4.0 → 1.4.1** (released 2026-09-04), with checksums for all twelve
+  release assets; 1.4.1 writes `lockfileVersion` 2, so committed locks stay valid. 1.4.0 stays in
+  the table for explicit `bunVersion` pins. `@types/bun` has not reached 1.4.1 on npm yet, so the
+  shipped default pairs with `DefaultBunTypesVersion = "1.4.0"` rather than tracking Bun blindly
+  (a 404 on every TypeScript frozen install); modules that override `bunVersion` keep lockstep.
 
 ## [0.3.0] - Managed toolchain, strict lockfiles, canonical vocabulary (2026-08-27)
 

@@ -9,7 +9,7 @@ It keeps Mill's task graph, caching, module relationships, Scala.js linker, and 
 - Mill 1.1.5+ (compiled against 1.1.5; the test suite and examples run on 1.1.8)
 - JDK 17+
 
-Bun does not need to be installed. The plugin downloads and checksum-verifies Bun 1.4.0 by default on macOS, Linux, and Windows x64/arm64. musl-based Linux (Alpine) is detected automatically; on x64 CPUs without AVX2, set `bunUseBaseline`. Set `MILL_BUN_USE_SYSTEM=true` to opt into the Bun on `PATH` instead.
+Bun does not need to be installed. The plugin downloads and checksum-verifies Bun 1.4.1 by default on macOS, Linux, and Windows x64/arm64. musl-based Linux (Alpine) is detected automatically; on x64 CPUs without AVX2, set `bunUseBaseline`. Set `MILL_BUN_USE_SYSTEM=true` to opt into the Bun on `PATH` instead.
 
 ## Scala.js quick start
 
@@ -133,7 +133,7 @@ Resolution order is:
 
 1. `bunExecutableOverride`
 2. system `PATH` when `bunUseSystem` or `MILL_BUN_USE_SYSTEM=true`
-3. checksum-verified managed Bun 1.4.0
+3. checksum-verified managed Bun 1.4.1
 
 Use `./mill app.bunDoctor` to print and validate the resolved executable, version, revision, mode, selected release asset, and linker.
 

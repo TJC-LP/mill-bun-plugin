@@ -135,8 +135,9 @@ object BunTypeScriptIntegrationTests extends BunIntegrationSuite {
       val packageJson = ujson.read(os.read(tester.workspacePath / "out" / "app" / "bunInstall.dest" / "package.json"))
       val devDeps = packageJson("devDependencies").obj
 
-      // Pinned, and pinned to the Bun we ship: @types/bun is published in lockstep with Bun.
-      assert(devDeps("@types/bun").str == BunToolchainModule.DefaultBunVersion)
+      // Pinned, and pinned to the types that pair with the Bun we ship. That is normally the same
+      // number, but npm can lag a Bun release, so the default carries its own types version.
+      assert(devDeps("@types/bun").str == BunToolchainModule.DefaultBunTypesVersion)
       assert(devDeps("@types/bun").str != "latest")
       assert(!devDeps.contains("@types/node"))
     }

@@ -12,7 +12,7 @@ object BunManagedToolchainIntegrationTests extends BunIntegrationSuite:
       assert(result.isSuccess)
       val executable = tester.out("app.bunExecutable").value[String]
       val version = os.proc(executable, "--version").call(stdout = os.Pipe).out.text().trim
-      assert(version == "1.4.0")
+      assert(version == BunToolchainModule.DefaultBunVersion)
       // First-ever coverage for the diagnostics command: it must at least evaluate.
       assert(tester.eval("app.bunDoctor").isSuccess)
 
@@ -40,4 +40,4 @@ object BunManagedToolchainIntegrationTests extends BunIntegrationSuite:
       val executable = tester.out("app.bunExecutable").value[String]
       assert(os.isFile(os.Path(executable)))
       val version = os.proc(executable, "--version").call(stdout = os.Pipe).out.text().trim
-      assert(version == "1.4.0")
+      assert(version == BunToolchainModule.DefaultBunVersion)
