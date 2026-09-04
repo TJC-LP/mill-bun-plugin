@@ -5,6 +5,29 @@ All notable changes to `mill-bun-plugin` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - Scala 3.9.0 LTS validation, Mill 1.1.8 (2026-09-04)
+
+### Changed
+
+- Every Scala.js integration fixture, `example-scalajs`, `examples`, and the README snippets now
+  build with **Scala 3.9.0 LTS** on Scala.js 1.22.0. Scala 3.9.0 emits Scala.js 1.22 IR, which the
+  linker bundled by Mill 1.1.x's `ScalaJSConfigModule` (IR ≤ 1.20) rejects; the explicit
+  `scalaJSVersion` route introduced in 0.3.0 is the supported way to build Scala 3.9 code, and the
+  suite now proves that exact combination.
+- The plugin builds and runs its unit, integration, and example suites on **Mill 1.1.8**:
+  `.mill-version`, the launcher defaults, every fixture/example `//| mill-version` header, and —
+  the part that actually decides which Mill the fixtures run in-process — `mill-testkit` is now
+  pinned separately (`millTestkitVersion = "1.1.8"`). The compile target stays at Mill 1.1.5, so
+  the supported floor is unchanged and the jar under test is the real consumer shape.
+- The plugin's own `scalaVersion` stays at 3.8.2 on purpose and now says why in `build.mill`: it
+  must match the Scala that Mill 1.1.x compiles build files with, or consumers hit a TASTy version
+  error at build-script compile time.
+- Managed Bun default **1.4.0 → 1.4.1** (released 2026-09-04), with checksums for all twelve
+  release assets; 1.4.1 writes `lockfileVersion` 2, so committed locks stay valid. 1.4.0 stays in
+  the table for explicit `bunVersion` pins. `@types/bun` has not reached 1.4.1 on npm yet, so the
+  shipped default pairs with `DefaultBunTypesVersion = "1.4.0"` rather than tracking Bun blindly
+  (a 404 on every TypeScript frozen install); modules that override `bunVersion` keep lockstep.
+
 ## [0.3.0] - Managed toolchain, strict lockfiles, canonical vocabulary (2026-08-27)
 
 ### Added

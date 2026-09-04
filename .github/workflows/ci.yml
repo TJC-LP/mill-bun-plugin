@@ -36,7 +36,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.0
+          bun-version: 1.4.1
 
       - name: Check formatting
         run: $MILL --no-server mill.scalalib.scalafmt.ScalafmtModule/checkFormatAll __.sources

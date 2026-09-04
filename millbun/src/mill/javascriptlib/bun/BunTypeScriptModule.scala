@@ -66,9 +66,14 @@ trait BunTypeScriptModule extends TypeScriptModule with BunToolchainModule with 
   /** Bun ambient types used for bun-targeted Bun builds.
     *
     * `@types/bun` is published in lockstep with Bun itself, so this tracks [[bunVersion]] by
-    * default and the two cannot drift.
+    * default. The one exception is the plugin's own default Bun, which pairs with
+    * [[BunToolchainModule.DefaultBunTypesVersion]] — npm can lag a Bun release by a day or two,
+    * and the shipped default must never 404 on release day.
     */
-  def bunTypesVersion: T[String] = Task { bunVersion() }
+  def bunTypesVersion: T[String] = Task {
+    if (bunVersion() == BunToolchainModule.DefaultBunVersion) BunToolchainModule.DefaultBunTypesVersion
+    else bunVersion()
+  }
 
   /** Ambient runtime types aligned to the configured Bun target. */
   protected def ambientTypeDeps: T[Seq[String]] = Task {

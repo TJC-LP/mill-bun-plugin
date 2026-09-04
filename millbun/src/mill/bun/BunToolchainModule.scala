@@ -13,10 +13,21 @@ object BunToolchainModule {
   /**
    * The Bun release this plugin is tested against and downloads by default.
    *
-   * Referenced by `bunVersion`, by `bunTypesVersion` (`@types/bun` is published in lockstep), and
-   * by the tests, so a bump is a one-line change here rather than a hunt for literals.
+   * Referenced by `bunVersion` and by the tests, so a bump is a one-line change here (plus the
+   * checksum row below) rather than a hunt for literals.
    */
-  val DefaultBunVersion = "1.4.0"
+  val DefaultBunVersion = "1.4.1"
+
+  /**
+   * `@types/bun` version paired with [[DefaultBunVersion]] by default.
+   *
+   * `@types/bun` normally ships in lockstep with Bun, but npm can lag a release by a day or two
+   * (1.4.1 shipped 2026-09-04 with no `@types/bun@1.4.1` yet). Tracking Bun blindly would make
+   * every TypeScript module's frozen install 404 on release day, so the shipped default pins the
+   * newest published types instead. Bump together with [[DefaultBunVersion]] once npm has caught
+   * up; modules that override `bunVersion` keep the lockstep behaviour.
+   */
+  val DefaultBunTypesVersion = "1.4.0"
 
   private val ModeledPackageJsonFields = Set(
     "dependencies",
@@ -69,16 +80,31 @@ object BunToolchainModule {
       "bun-windows-aarch64.zip" -> "f473bfe2df73ee770548c93dd5d380aea7120c218ec2aa1afdd0bbba7bf18c47",
       "bun-windows-x64.zip" -> "e6f093d39da486b20262ca8cdd5ed6a9e8bc9c2f275b78e6d3a0c5b28cc95901",
       "bun-windows-x64-baseline.zip" -> "b929c54a9badb104a16dedd23aab6152c86793ae653d4e6b13983ffd0c882a66"
+    ),
+    "1.4.1" -> Map(
+      "bun-darwin-aarch64.zip" -> "d8973ce835fa7867e5cc79afee6fc6f1ae0117aa4bd5fc2546fd00c512f71386",
+      "bun-darwin-x64.zip" -> "8f34239f276a3f0d27bfcd1ffecfe5d2127e74fb0aa4c0971a0cdec7b225c965",
+      "bun-darwin-x64-baseline.zip" -> "498e76d61bbe87d2306f65fed60ae86b6b0c8ee2da709f83202808db1a09e407",
+      "bun-linux-aarch64.zip" -> "580ce77533108dc6b10bec1721397e4f5aa44e909726da2451d483dfc5e581d6",
+      "bun-linux-aarch64-musl.zip" -> "53895807a00508f70e76715947097aa533ec520aac066501c00fb77d2b1a7a6c",
+      "bun-linux-x64.zip" -> "74c1c3bee7cd998500c8f969cd8972355ac6a07207e94a39eece1999b56ffabf",
+      "bun-linux-x64-baseline.zip" -> "a8c9c6738202e2fced555dd860a953c56c0cd059f75041e7010ae81a32802646",
+      "bun-linux-x64-musl.zip" -> "ea116fe09f2f764c87b9bf735225b781d1f7674ca58d66040470f38a7943c8ab",
+      "bun-linux-x64-musl-baseline.zip" -> "74d04038a21e6ae816f9e74525b754b85294be99632b336cb4c57019c9313829",
+      "bun-windows-aarch64.zip" -> "41ea66155baf0ac1f8545f8d54544bcaf4908104193c5db9aad85d6f53ae1bd7",
+      "bun-windows-x64.zip" -> "52b1f3028b01f43d37fefdf669d034a1ee2e0d96c56bb13c393bdaf169b1af84",
+      "bun-windows-x64-baseline.zip" -> "2d1871e72b28165a8574a9c91de867cbe499f55b8c75facf4fb9e42888eddba6"
     )
   )
 
   /** Versions with a complete bundled checksum table, for diagnostics. */
   private[bun] def bundledVersions: Seq[String] = BundledChecksums.keys.toSeq.sorted
 
-  /** Highest `lockfileVersion` each bundled Bun can read. 1.4.0 writes v2; 1.3.14 fails on v2. */
+  /** Highest `lockfileVersion` each bundled Bun can read. 1.4.x writes v2; 1.3.14 fails on v2. */
   private val SupportedLockfileVersions: Map[String, Int] = Map(
     "1.3.14" -> 1,
-    "1.4.0" -> 2
+    "1.4.0" -> 2,
+    "1.4.1" -> 2
   )
 
   private[bun] def supportedLockfileVersion(bunVersion: String): Option[Int] =

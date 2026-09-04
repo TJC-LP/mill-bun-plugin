@@ -84,7 +84,7 @@ object BunToolchainTests extends TestSuite:
         assert(checksum.exists(_.matches("[0-9a-f]{64}")))
 
     test("pins the versions the docs and CI claim"):
-      assert(BunToolchainModule.bundledVersions == Seq("1.3.14", "1.4.0"))
+      assert(BunToolchainModule.bundledVersions == Seq("1.3.14", "1.4.0", "1.4.1"))
       // The default must be one we ship checksums for, or the managed path cannot work offline.
       assert(BunToolchainModule.bundledVersions.contains(BunToolchainModule.DefaultBunVersion))
 

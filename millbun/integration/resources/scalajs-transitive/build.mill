@@ -1,4 +1,4 @@
-//| mill-version: 1.1.5
+//| mill-version: 1.1.8
 //| mill-jvm-version: system
 //| mvnDeps:
 //| - com.tjclp::mill-bun_mill1:0.0.0-NIGHTLY
@@ -13,7 +13,7 @@ import mill.scalajslib.bun.*
 // lib keeps its own moduleDir (lib/): sharing the root with app would make both modules
 // resolve the same bun.lock, and only one dependency set can be recorded there.
 object lib extends BunScalaJSModule {
-  def scalaVersion = "3.8.2"
+  def scalaVersion = "3.9.0"
   def scalaJSVersion = "1.22.0"
 
   override def moduleKind = Task { ModuleKind.ESModule }

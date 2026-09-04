@@ -1,4 +1,4 @@
-//| mill-version: 1.1.5
+//| mill-version: 1.1.8
 //| mill-jvm-version: system
 //| mvnDeps:
 //| - com.tjclp::mill-bun_mill1:0.0.0-NIGHTLY
@@ -12,7 +12,7 @@ import mill.scalajslib.bun.*
 
 object app extends BunScalaJSModule {
   override def moduleDir = build.moduleDir
-  def scalaVersion = "3.8.2"
+  def scalaVersion = "3.9.0"
   def scalaJSVersion = "1.22.0"
 
   override def mainClass = Some("Main")
